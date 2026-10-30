@@ -1,0 +1,16 @@
+{
+  "name": "zoomouse",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --filter @zoomouse/preview dev",
+    "build": "pnpm --filter @zoomouse/preview build",
+    "typecheck": "pnpm --filter @zoomouse/protocol typecheck && pnpm --filter @zoomouse/preview typecheck",
+    "test": "pnpm --filter @zoomouse/protocol test",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
