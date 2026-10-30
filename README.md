@@ -45,7 +45,7 @@ pnpm check
 3. **Keyboard, multimedia, per-device settings and reconnection.**
 4. **Internet/mobile network access** via authenticated signaling + TURN, after LAN quality and security gates.
 
-See [architecture](docs/ARCHITECTURE.md) and [roadmap](docs/ROADMAP.md).
+See [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md) and the [M0 code/requirements QA report](docs/QA-2026-10-30.md). The CI gate now includes strict typecheck, ESLint, protocol/preview tests and production build.
 
 ## License
 

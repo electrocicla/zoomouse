@@ -7,10 +7,17 @@
     "dev": "pnpm --filter @zoomouse/preview dev",
     "build": "pnpm --filter @zoomouse/preview build",
     "typecheck": "pnpm --filter @zoomouse/protocol typecheck && pnpm --filter @zoomouse/preview typecheck",
-    "test": "pnpm --filter @zoomouse/protocol test",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "test": "pnpm --filter @zoomouse/protocol test && pnpm --filter @zoomouse/preview test",
+    "lint": "eslint apps/preview/src packages/protocol/src apps/preview/vite.config.ts",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "typescript-eslint": "^8.72.1"
   }
 }

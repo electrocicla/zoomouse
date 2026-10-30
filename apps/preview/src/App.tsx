@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ReactNode, PointerEvent } from "react";
+import type { ReactNode, PointerEvent, KeyboardEvent } from "react";
 import {
   Activity, ArrowLeft, BookOpen, Check, ChevronRight, CircleHelp, Crosshair,
   Eye, Globe, Keyboard, Laptop, LockKeyhole, Maximize2, Monitor, MonitorPlay,
@@ -14,8 +14,9 @@ type SwitchProps = { checked: boolean; onChange: (next: boolean) => void; label:
 type SectionProps = { title: string; children: ReactNode };
 type MenuRowProps = { icon?: ReactNode; title: string; detail?: string; onClick?: () => void; trailing?: ReactNode };
 
+const defaultHost: Host = { id: "studio", name: "ZOOMOUSE-STUDIO", ip: "192.168.1.12", label: "PC principal · ejemplo" };
 const hosts: Host[] = [
-  { id: "studio", name: "ZOOMOUSE-STUDIO", ip: "192.168.1.12", label: "PC principal · ejemplo" },
+  defaultHost,
   { id: "office", name: "OFFICE-PC", ip: "192.168.1.28", label: "PC secundario · ejemplo" }
 ];
 
@@ -44,22 +45,33 @@ function MenuRow({ icon, title, detail, onClick, trailing }: MenuRowProps) {
   </div>;
 }
 
-function DemoDesktop({ zoom, cursor, move }: {
+function DemoDesktop({ zoom, cursor, anchor, expanded, move }: {
   zoom: ZoomSettings;
   cursor: { x: number; y: number };
+  anchor: { x: number; y: number };
+  expanded: boolean;
   move: (x: number, y: number) => void;
 }) {
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.buttons === 0 && event.pointerType !== "touch") return;
+    if (event.pointerType === "touch" && event.buttons === 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
     move(Math.round(Math.max(10, Math.min(90, (event.clientX - rect.left) / rect.width * 100))),
       Math.round(Math.max(10, Math.min(90, (event.clientY - rect.top) / rect.height * 100))));
   };
-  return <div className="video-sim" onPointerDown={onPointerMove} onPointerMove={onPointerMove}
-    role="img" aria-label="Simulación de una pantalla Windows con una región de zoom centrada en el cursor">
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const delta: Record<string, [number, number]> = {
+      ArrowLeft: [-3, 0], ArrowRight: [3, 0], ArrowUp: [0, -3], ArrowDown: [0, 3]
+    };
+    const movement = delta[event.key];
+    if (!movement) return;
+    event.preventDefault();
+    move(Math.max(10, Math.min(90, cursor.x + movement[0])), Math.max(10, Math.min(90, cursor.y + movement[1])));
+  };
+  return <div className={"video-sim" + (expanded ? " video-expanded" : "")} onPointerDown={onPointerMove} onPointerMove={onPointerMove}
+    onKeyDown={onKeyDown} tabIndex={0} role="group" aria-label="Pantalla Windows simulada: usa las flechas para mover el cursor">
     <div className="scene" style={{
       transform: "scale(" + (zoom.enabled ? zoom.magnification : 1) + ")",
-      transformOrigin: (zoom.followCursor ? cursor.x : 50) + "% " + (zoom.followCursor ? cursor.y : 50) + "%"
+      transformOrigin: anchor.x + "% " + anchor.y + "%"
     }}>
       <div className="scene-top"><span>◉</span><span>ZOOMOUSE / VISTA DE EJEMPLO</span><span>— □ ×</span></div>
       <div className="scene-content">
@@ -84,11 +96,16 @@ function DemoDesktop({ zoom, cursor, move }: {
 
 function App() {
   const [screen, setScreen] = useState<Screen>("connect");
-  const [activeHost, setActiveHost] = useState<Host>(hosts[0]!);
+  const [activeHost, setActiveHost] = useState<Host>(defaultHost);
   const [zoom, setZoom] = useState<ZoomSettings>(defaults);
   const [cursor, setCursor] = useState({ x: 58, y: 45 });
+  const [cropAnchor, setCropAnchor] = useState({ x: 58, y: 45 });
+  const [videoExpanded, setVideoExpanded] = useState(false);
+  const [lastAction, setLastAction] = useState("Ninguna acción simulada");
+  const [panelOrderReversed, setPanelOrderReversed] = useState(false);
   const [keyboardText, setKeyboardText] = useState("");
   const [manualIpVisible, setManualIpVisible] = useState(false);
+  const [qrVisible, setQrVisible] = useState(false);
   const [manualIp, setManualIp] = useState("");
   const [touchSpeed, setTouchSpeed] = useState(55);
   const [scrollSpeed, setScrollSpeed] = useState(48);
@@ -102,7 +119,23 @@ function App() {
   const [showKeys, setShowKeys] = useState(false);
   const [helpItem, setHelpItem] = useState("Primeros pasos");
 
-  const updateZoom = (patch: Partial<ZoomSettings>) => setZoom(current => ({ ...current, ...patch }));
+  const updateZoom = (patch: Partial<ZoomSettings>) => {
+    if (patch.followCursor === true) setCropAnchor(cursor);
+    setZoom(current => ({ ...current, ...patch }));
+  };
+  const moveDemoCursor = (x: number, y: number) => {
+    const next = { x, y };
+    setCursor(next);
+    if (zoom.followCursor) setCropAnchor(next);
+  };
+  const moveTouchpad = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    moveDemoCursor(
+      Math.round(Math.max(10, Math.min(90, (event.clientX - rect.left) / rect.width * 70 + 15))),
+      Math.round(Math.max(10, Math.min(90, (event.clientY - rect.top) / rect.height * 60 + 20)))
+    );
+  };
   const openHost = (host: Host) => { setActiveHost(host); setScreen("remote"); };
   const menuIcon = (s: Screen) => s === "connect" ? <Wifi size={19} /> :
     s === "remote" ? <MousePointer2 size={19} /> : s === "settings" ? <Settings2 size={19} /> : <CircleHelp size={19} />;
@@ -126,40 +159,41 @@ function App() {
           {screen === "connect" ? <span className="page-icon"><Wifi size={19}/></span> :
             <button aria-label="Volver a dispositivos" className="back-btn" onClick={() => setScreen("connect")}><ArrowLeft size={20}/></button>}
           <span>{screen === "connect" ? "Conectar" : screen === "remote" ? activeHost.name : screen === "settings" ? "Ajustes" : "Ayuda"}</span>
-          {screen === "connect" ? <button className="icon-button lime" aria-label="Agregar equipo" onClick={() => setManualIpVisible(!manualIpVisible)}><Plus size={24}/></button> : <span className="header-spacer" />}
+          {screen === "connect" ? <button className="icon-button lime" aria-label="Agregar equipo" onClick={() => { setQrVisible(false); setManualIpVisible(value => !value); }}><Plus size={24}/></button> : <span className="header-spacer" />}
         </div>
 
         <div className="phone-content" key={screen}>
           {screen === "connect" && <>
             <div className="phone-highlight"><span className="micro-label">RED LOCAL</span><div className="network-head"><span className="network-icon"><Router size={24}/></span><div><strong>Dispositivos disponibles</strong><small>Descubrimiento mDNS · próximamente</small></div></div></div>
+            {qrVisible && <div className="manual-card" role="status"><strong>Escanear código QR (demo)</strong><p>La cámara y el emparejamiento QR estarán disponibles en M1. Este prototipo no solicita acceso a la cámara.</p><button onClick={() => setQrVisible(false)}>Cerrar</button></div>}
             {manualIpVisible && <div className="manual-card"><label htmlFor="manual-ip">Conexión directa por IP (demo)</label><input id="manual-ip" placeholder="192.168.1.100" value={manualIp} onChange={e => setManualIp(e.target.value)} /><p>El campo es demostrativo: aún no se realiza una conexión.</p><button onClick={() => setManualIpVisible(false)}>Cerrar</button></div>}
             <div className="list-caption"><span>COMPUTADORES / EJEMPLOS</span><span>02</span></div>
             {hosts.map(host => <button key={host.id} className="device-row" onClick={() => openHost(host)}>
               <span className="device-icon"><Monitor size={24}/></span><span className="device-copy"><strong>{host.name}</strong><small>{host.label}</small></span><ChevronRight size={17}/></button>)}
-            <div className="connect-actions"><button onClick={() => setManualIpVisible(true)}><Globe size={17}/> Conectar por IP</button><button onClick={() => setManualIpVisible(true)}><ScanLine size={17}/> Escanear QR</button></div>
+            <div className="connect-actions"><button onClick={() => { setQrVisible(false); setManualIpVisible(true); }}><Globe size={17}/> Conectar por IP</button><button onClick={() => { setManualIpVisible(false); setQrVisible(true); }}><ScanLine size={17}/> Escanear QR</button></div>
             <div className="inline-note"><LockKeyhole size={16}/><span>El equipo Windows siempre deberá autorizar el acceso antes de activar el control o video.</span></div>
           </>}
 
           {screen === "remote" && <>
             <div className="remote-meta"><span><span className="orange-dot"/> SESIÓN DE PRUEBA</span><span>1080p · MOCK</span></div>
-            <DemoDesktop zoom={zoom} cursor={cursor} move={(x,y) => setCursor({x,y})} />
-            <div className="remote-video-controls"><button aria-label="Video simulado" className="control-pill selected"><Video size={17}/> Vista en vivo <span>DEMO</span></button><button aria-label="Vista completa simulada" className="square-button"><Maximize2 size={17}/></button></div>
+            <DemoDesktop zoom={zoom} cursor={cursor} anchor={cropAnchor} expanded={videoExpanded} move={moveDemoCursor} />
+            <div className="remote-video-controls"><span className="control-pill selected"><Video size={17}/> Vista simulada <span>DEMO</span></span><button aria-label={videoExpanded ? "Contraer video simulado" : "Ampliar video simulado"} aria-pressed={videoExpanded} className="square-button" onClick={() => setVideoExpanded(value => !value)}><Maximize2 size={17}/></button></div>
             <div className="control-card"><div className="control-title"><ZoomIn size={17}/> ZOOM INTELIGENTE <span>{zoom.magnification.toFixed(1)}×</span></div>
               <div className="toggle-row"><div><strong>Zoom</strong><small>Ampliar una región de pantalla</small></div><Switch label="Activar zoom" checked={zoom.enabled} onChange={v=>updateZoom({enabled:v})}/></div>
               <div className="toggle-row"><div><strong>Seguir cursor</strong><small>El recorte persigue el puntero</small></div><Switch label="Seguir cursor" checked={zoom.followCursor} onChange={v=>updateZoom({followCursor:v})}/></div>
               <input aria-label="Nivel de zoom" type="range" min={1} max={4} step={0.1} value={zoom.magnification} disabled={!zoom.enabled} onChange={e=>updateZoom({magnification:Number(e.target.value)})}/>
               <div className="range-ticks"><span>1.0×</span><span>4.0×</span></div>
             </div>
-            <div className="input-mode-row"><button className={!showKeys ? "active" : ""} onClick={()=>setShowKeys(false)}><MousePointer2 size={16}/> Touchpad</button><button className={showKeys ? "active" : ""} onClick={()=>setShowKeys(true)}><Keyboard size={16}/> Teclado</button></div>
+            <div className="input-mode-row" style={{flexDirection: panelOrderReversed ? "row-reverse" : "row"}}><button className={!showKeys ? "active" : ""} onClick={()=>setShowKeys(false)}><MousePointer2 size={16}/> Touchpad</button><button className={showKeys ? "active" : ""} onClick={()=>setShowKeys(true)}><Keyboard size={16}/> Teclado</button></div>
             {showKeys ? <div className="keyboard-demo"><label htmlFor="demo-text">Entrada de teclado (solo demostración)</label><input id="demo-text" value={keyboardText} onChange={e=>setKeyboardText(e.target.value)} placeholder="Escribe aquí..." /><small>Sin envío real al PC.</small></div> :
-              <div className="touchpad-demo" onPointerDown={event=>{const rect=event.currentTarget.getBoundingClientRect();setCursor({x:Math.round((event.clientX-rect.left)/rect.width*70+15),y:Math.round((event.clientY-rect.top)/rect.height*60+20)});}}>
+              <div className="touchpad-demo" onPointerDown={event=>{event.currentTarget.setPointerCapture?.(event.pointerId);moveTouchpad(event);}} onPointerMove={event=>{if(event.buttons!==0)moveTouchpad(event);}}>
                 <MousePointer2 size={22}/><span>Desliza y toca aquí</span><small>Touchpad de ejemplo · sin control real</small></div>}
-            <div className="mouse-buttons"><button onClick={()=>setCursor({x:Math.max(10,cursor.x-3),y:cursor.y})}>Clic izquierdo</button><button onClick={()=>setCursor({x:Math.min(90,cursor.x+3),y:cursor.y})}>Clic derecho</button></div>
+            <div className="mouse-buttons" style={{flexDirection: leftHand ? "row-reverse" : "row"}}><button onClick={()=>setLastAction("Clic izquierdo simulado")}>Clic izquierdo</button><button onClick={()=>setLastAction("Clic derecho simulado")}>Clic derecho</button></div><p className="action-feedback" role="status">{lastAction} · sin enviar al PC</p>
           </>}
 
           {screen === "settings" && <>
             <Section title="INTERFAZ">
-              <MenuRow icon={<SlidersHorizontal size={19}/>} title="Orden del panel" detail="Personaliza tus controles" onClick={()=>setLeftHand(!leftHand)} trailing={<span className="value-label">{leftHand?"Zurdo":"Normal"}</span>}/>
+              <MenuRow icon={<SlidersHorizontal size={19}/>} title="Orden del panel" detail="Invertir Touchpad y Teclado (demo)" onClick={()=>setPanelOrderReversed(!panelOrderReversed)} trailing={<span className="value-label">{panelOrderReversed?"Invertido":"Normal"}</span>}/>
               <MenuRow title="Botón Gyro Mouse" detail="Mover puntero inclinando el móvil" onClick={()=>setGyro(!gyro)} trailing={<Switch label="Gyro Mouse" checked={gyro} onChange={setGyro}/>}/>
               <MenuRow title="Modo zurdo" detail="Invertir diseño y controles" onClick={()=>setLeftHand(!leftHand)} trailing={<Switch label="Modo zurdo" checked={leftHand} onChange={setLeftHand}/>}/>
             </Section>
@@ -185,6 +219,7 @@ function App() {
             <Section title="OTROS CONTROLES">
               {["Multimedia y volumen","Navegador y aplicaciones","Atajos de teclado","Seguridad y privacidad","Preguntas frecuentes"].map(item=><MenuRow key={item} title={item} onClick={()=>setHelpItem(item)} trailing={helpItem===item?<Check size={17} className="lime"/>:<ChevronRight size={17}/>}/>)}
             </Section>
+            {(["Multimedia y volumen", "Navegador y aplicaciones", "Atajos de teclado", "Seguridad y privacidad", "Preguntas frecuentes"] as const).some(item => item === helpItem) && <p className="help-expanded" role="status">Funcionalidad prevista para M3. Este prototipo no interactúa con Windows.</p>}
           </>}
         </div>
 
@@ -199,7 +234,7 @@ function App() {
         <div className="host-dashboard">
           <div className="host-head"><div className="host-badge"><MonitorPlay size={24}/></div><div><strong>Zoomouse Host</strong><span>Servicio de sesión · concepto</span></div><span className="pending">DEMO</span></div>
           <div className="host-machine"><Laptop size={20}/><span>ZOOMOUSE-STUDIO</span><span className="host-os">Win 11</span></div>
-          <div className="host-status"><span className="status-dot"/><span>Esperando permiso local</span></div>
+          <div className="host-status" role="status"><span className="status-dot"/><span>{hostApproved ? (captureAllowed ? "Control y vídeo simulados autorizados" : "Control simulado autorizado") : "Esperando permiso local"}</span></div>
           <div className="approval-box"><div className="approval-top"><ShieldCheck size={20}/><div><strong>Solicitud de emparejamiento</strong><small>Android · dispositivo de ejemplo</small></div></div>
             <div className="host-actions">{hostApproved ? <button className="approved" onClick={()=>{setHostApproved(false);setCaptureAllowed(false);}}><Check size={16}/> Permiso demo concedido · revocar</button> : <button className="approve-btn" onClick={()=>setHostApproved(true)}><Check size={16}/> Autorizar ejemplo</button>}
               <button className="decline-btn" onClick={()=>{setHostApproved(false);setCaptureAllowed(false);}}><X size={16}/> Denegar</button></div>
