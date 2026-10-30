@@ -47,9 +47,10 @@ export function App() {
       await invoke("emergency_stop");
       await refresh();
     } catch {
-      ++statusRequest.current;
-      setStatus(null);
-      setError("Emergency-stop acknowledgement failed. Host cleanup is UNVERIFIED; check locally.");
+      // Re-read the native latch even on a failed revoke acknowledgement.
+      // A tray/IPC release error must remain visible after the window opens.
+      await refresh();
+      setError("Emergency-stop failed or its acknowledgement was lost. Do not assume native input was released; verify locally.");
     } finally {
       setStopping(false);
     }
@@ -60,7 +61,7 @@ export function App() {
       <header>
         <span className="eyebrow">ZOOMOUSE / WINDOWS 11</span>
         <h1>Host controls</h1>
-        <p>Private LAN foundation. Pairing and native input are not yet enabled.</p>
+        <p>Private LAN foundation. Pairing, approval and native input remain disabled.</p>
       </header>
       <section className="card" aria-labelledby="status-title">
         <div className="row">
@@ -68,23 +69,35 @@ export function App() {
           <span className="badge">{status?.phase ?? "Unverified"}</span>
         </div>
         <p className="muted">
-          No remote device can control your keyboard or mouse until a future
-          authenticated pairing flow receives explicit local approval.
-          This build has no approval or remote-input command.
+          This installed source revision cannot grant remote control or screen access.
+          The Windows host has neither authenticated DTLS channel evidence nor an
+          OS-observed user-session approval callback. No renderer approval command exists.
         </p>
         <dl>
           <div><dt>Remote input</dt><dd>{status ? (status.inputEnabled ? "Enabled" : "Disabled") : "Unverified"}</dd></div>
           <div><dt>LAN discovery</dt><dd>{status ? (status.discoveryEnabled ? "Enabled" : "Not configured") : "Unverified"}</dd></div>
           <div><dt>Screen streaming</dt><dd>{status ? (status.captureEnabled ? "Enabled" : "Disabled") : "Unverified"}</dd></div>
           <div><dt>Session scope</dt><dd>{status?.localUserSessionOnly ? "Interactive user only" : "Unverified"}</dd></div>
+          <div><dt>Local approval</dt><dd>{status ? "Disabled — native authority missing" : "Unverified"}</dd></div>
+          <div><dt>Release outcome</dt><dd>{
+            !status ? "Unverified" :
+            status.lastReleaseOutcome === "confirmed" ? "Disabled-backend cleanup succeeded" :
+            status.lastReleaseOutcome === "failed" ? "FAILED — local review required" :
+            "Not requested"
+          }</dd></div>
         </dl>
       </section>
       <section className="card" aria-labelledby="safety-title">
         <h2 id="safety-title">Local control</h2>
         <p className="muted">Revocation attempts native key/button cleanup even when no device is connected.</p>
         {status?.cleanupFailed && (
-          <p className="error" role="alert">Native input cleanup failed. Verify keys and buttons locally before reconnecting.</p>
+          <p className="error" role="alert">Native input cleanup failed. Verify keys and buttons locally before reconnecting. Quit is blocked when cleanup fails.</p>
         )}
+        <p className="muted">
+          Emergency stop revokes the host state and attempts backend release.
+          A successful result here does not establish physical Win32 input testing.
+          Tray Emergency stop and Quit follow the same fail-closed release path.
+        </p>
         <button type="button" onClick={() => void emergencyStop()} disabled={!nativeApp || stopping}>
           {stopping ? "Revoking…" : "Emergency stop / revoke all"}
         </button>
@@ -94,8 +107,11 @@ export function App() {
         {error && <p role="alert" className="error">{error}</p>}
       </section>
       <footer>
-        M1-C scaffold only: no listening port, input injection, screen capture,
-        service installation or administrator privileges.
+        R6-WIN source-only shell: no listening port, input injection, screen capture,
+        service installation, administrator privileges, or consent presentation.
+        To enable device/session-bound consent later, the host must provide trusted
+        DTLS peer/key evidence and a native Windows interactive-session approval receipt.
+        A01–A17 physical acceptance is not complete.
       </footer>
     </main>
   );

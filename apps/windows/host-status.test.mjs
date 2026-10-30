@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseHostStatus } from "./src/host-status.ts";
+import { NATIVE_APPROVAL_GATE, parseHostStatus } from "./src/host-status.ts";
 
 const denied = Object.freeze({
   phase: "Denied",
@@ -8,49 +8,51 @@ const denied = Object.freeze({
   cleanupFailed: false,
   discoveryEnabled: false,
   captureEnabled: false,
-  localUserSessionOnly: true
+  localUserSessionOnly: false,
+  approvalGate: NATIVE_APPROVAL_GATE,
+  lastReleaseOutcome: "notAttempted"
 });
 
-test("native denied and revoked states are explicit", () => {
+test("local shell is denied and native release outcome is observable", () => {
   assert.deepEqual(parseHostStatus(denied), denied);
-  assert.equal(parseHostStatus({ ...denied, phase: "Revoked", cleanupFailed: true })?.cleanupFailed, true);
+  const revoked = { ...denied, phase: "Revoked", lastReleaseOutcome: "confirmed" };
+  assert.deepEqual(parseHostStatus(revoked), revoked);
+  const failed = { ...revoked, lastReleaseOutcome: "failed", cleanupFailed: true };
+  assert.deepEqual(parseHostStatus(failed), failed);
 });
 
-test("malformed IPC payloads remain unverified rather than approved", () => {
+test("malformed IPC payloads remain unverified", () => {
   for (const value of [
     null, undefined, [], "Approved", 1, {}, { ...denied, phase: "SomethingElse" },
     { ...denied, inputEnabled: "true" }, { ...denied, discoveryEnabled: null },
-    { ...denied, localUserSessionOnly: undefined }, { ...denied, captureEnabled: 1 }
+    { ...denied, localUserSessionOnly: undefined }, { ...denied, captureEnabled: 1 },
+    { ...denied, approvalGate: undefined }, { ...denied, lastReleaseOutcome: "unknown" }
   ]) {
     assert.equal(parseHostStatus(value), null);
   }
 });
 
-test("invalid active-input claims cannot appear as an approved local host", () => {
+test("renderer rejects fabricated consent/channel/desktop/input claims", () => {
   for (const override of [
-    { phase: "Denied" },
+    { phase: "Approved" },
     { phase: "Pending" },
-    { phase: "Revoked" },
-    { cleanupFailed: true },
-    { localUserSessionOnly: false }
+    { inputEnabled: true },
+    { discoveryEnabled: true },
+    { captureEnabled: true },
+    { localUserSessionOnly: true },
+    { approvalGate: "ready" }
   ]) {
-    assert.equal(parseHostStatus({ ...denied, phase: "Approved", inputEnabled: true, ...override }), null);
+    assert.equal(parseHostStatus({ ...denied, ...override }), null);
   }
-  const approved = { ...denied, phase: "Approved", inputEnabled: true };
-  assert.deepEqual(parseHostStatus(approved), approved);
 });
 
-test("unknown desktop context and failed cleanup cannot imply active service or approval", () => {
-  const unverified = { ...denied, localUserSessionOnly: false };
-  assert.deepEqual(parseHostStatus(unverified), unverified);
-  for (const status of [
-    { ...unverified, phase: "Approved" },
-    { ...denied, phase: "Approved", cleanupFailed: true },
-    { ...unverified, discoveryEnabled: true },
-    { ...unverified, captureEnabled: true },
-    { ...denied, cleanupFailed: true, discoveryEnabled: true },
-    { ...denied, cleanupFailed: true, captureEnabled: true }
+test("release state cannot mask failure or contradict native revocation", () => {
+  for (const value of [
+    { ...denied, cleanupFailed: false, lastReleaseOutcome: "failed" },
+    { ...denied, phase: "Denied", lastReleaseOutcome: "confirmed" },
+    { ...denied, phase: "Denied", lastReleaseOutcome: "failed", cleanupFailed: true },
+    { ...denied, phase: "Revoked", lastReleaseOutcome: "failed", cleanupFailed: false }
   ]) {
-    assert.equal(parseHostStatus(status), null);
+    assert.equal(parseHostStatus(value), null);
   }
 });

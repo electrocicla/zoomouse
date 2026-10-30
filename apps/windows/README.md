@@ -13,3 +13,34 @@ M1-C QA at HEAD baseline `121429f1b97b`: the focused Windows tests (3/3), strict
 ## M1-D/E/F gates
 
 Integrate authenticated pairing, local Windows consent UI with no remote approval RPC, private-interface discovery, crypto session binding, bounded input policy and real native mouse/keyboard release; then package/install and verify with physical Windows 11/Android devices. A simulated, isolated or headless unit test is not native E2E acceptance.
+
+
+## R6-WIN native authority diagnostics (source-only)
+
+The Tauri Rust state now exposes **read-only** `approvalGate` and
+`lastReleaseOutcome` in `host_status`. The fixed gate
+`missingVerifiedChannelAndNativeApproval` explicitly means production
+authorization is **not** available. The renderer rejects forged `Approved`,
+`Pending`, active input, capture, discovery or OS-session claims while this
+gate remains in effect. Its UX never offers an Approve button.
+
+Emergency stop, tray Revoke and tray Quit use the same Rust-side revoke +
+backend-release method. A release failure is latched for diagnostics and tray
+Quit refuses to exit silently; tray Revoke surfaces the window on failure.
+`confirmed` means **only** that `DisabledInput` returned success (not that
+real Windows keys/buttons were exercised). A poisoned lock or unreadable IPC
+remains `Unverified`; no cleanup guarantee is inferred.
+
+The native authority contract needed before enabling an approval panel is:
+(1) a DTLS/WebRTC adapter that proves the actual authenticated device public
+key, session ID and channel binding; (2) OS-observed interactive-session
+`DesktopContext`, including active/locked/secure-desktop changes; (3) a
+host-owned native consent presentation tied to the exact pending
+device/session/channel, where only an OS-local callback can mint
+`NativePairingApprovalReceipt` and `NativeApprovalReceipt`; (4) expiry,
+revoke/disconnect/desktop-loss cleanup with a real input backend; and (5)
+approved private-LAN/firewall integration and A01–A17 physical tests.
+`crates/host/src/admission.rs` exposes **no production constructors** for
+those receipts/evidence, and its bootstrap is disabled. Do not add an IPC
+command or renderer state that fabricates them. No installer is created by
+this source change; user-owned packaging is separate.
