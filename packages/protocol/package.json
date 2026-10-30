@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./session-policy": "./src/session-policy.ts"
+    "./session-policy": "./src/session-policy.ts",
+    "./pairing-wire": "./src/pairing-wire.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
