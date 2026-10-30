@@ -25,6 +25,17 @@ Local approval is deliberately **unreachable in production** until M1-D supplies
 
 Run: `cargo test --manifest-path crates/host/Cargo.toml`, `cargo fmt --manifest-path crates/host/Cargo.toml --check` and `cargo check --manifest-path crates/host/Cargo.toml`; these validate the pure substrate only.
 
+## M1-D-LIVE — private TCP pairing adapter (SOURCE ONLY)
+
+`src/pairing_tcp.rs` is a **crate-private**, never-started listener foundation. The existing Tauri shell does not import or invoke it. A future Windows host-local owner must explicitly call the constructor after validating OS network interface, LAN firewall policy, interactive desktop and a reviewed encrypted transport. Nothing currently binds a production port or advertises mDNS/QR operationally.
+
+- `PairingTcpListener::bind` accepts only a validated, specific RFC1918/ULA interface and confirms that the operating system bound exactly the requested address; wildcard, loopback, link-local, CGNAT or public endpoints are denied by `PrivateLanEndpoint`. Address matching alone **does not** rule out VPN/tunnel exposure; firewall/route/interface provenance is a separate blocked gate.
+- The nonblocking `accept_once` gets the peer from `TcpListener::accept`, never from wire JSON. On each new connection it enforces 8 attempts/IP/60s with 64 tracked IPs, 2048-byte UTF-8 newline-delimited JSON frames, strict `version=1`/types/unknown-field rejection, fixed lowercase hex, 3s absolute per-frame read deadlines, 3s socket write timeout and deterministic socket shutdown on all paths. Rust registry retains the preexisting maximum 16 outstanding challenges and 60s TTL.
+- `pairing.phone-hello` invokes native Ed25519 challenge signing. `pairing.host-challenge` returns the exact **OS-observed socket endpoint** in the signed transcript. `pairing.phone-proof` must return over the same socket and validate the original request ID/key/source; a valid proof yields ONLY a `LocalPairingRequest` for future native display, never input/capture permission. Incorrect signature or source consumes the challenge and cannot replay.
+- The bound QR helper can derive only the host-key locator from an actual bound private TCP socket + live signing key; it intentionally does not advertise the legacy UDP mDNS service type. **No mDNS registrar or native QR renderer** is installed. Manual IP and an advertised host key are locators, never local approval; mobile must verify its independently pinned host key/signature with native crypto.
+- **Do not turn this plaintext TCP adapter into a shipping user-facing listener.** It has no TLS/DTLS channel confidentiality, transport-to-phone-key cryptographic binding, OS-trusted local decision UI, Windows firewall/interface attestation or end-to-end revocation/input cleanup integration. It is not a secure control DataChannel. There is no native input, desktop capture, shell or elevation endpoint in the adapter.
+- Synthetic Rust tests cover v1 JSON → challenge → Ed25519 proof and one-use burn, wrong-source rejection, invalid/extra/oversized input and rate caps; physical Android↔Windows and A01–A17 are **NOT RUN**. A native private-IP bind is not claimed from loopback test fixtures.
+
 ## Focused check
 
 From the repository root, once Rust is installed: `cargo test --manifest-path crates/host/Cargo.toml`. This only validates the pure state machine. The Tauri application has its own manifest at `apps/windows/src-tauri/Cargo.toml`.

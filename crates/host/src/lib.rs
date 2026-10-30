@@ -7,6 +7,9 @@ pub mod error;
 pub mod input;
 pub mod lan;
 pub mod pairing;
+// No Tauri/runtime entrypoint: plaintext pairing is intentionally inaccessible.
+#[allow(dead_code)]
+mod pairing_tcp;
 
 pub use boundary::{AuthenticatedPeer, DesktopContext, HostSession};
 pub use consent::{ConsentController, ConsentPhase, ConsentRequest, LocalDecision};
