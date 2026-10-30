@@ -34,10 +34,10 @@ A vetted WebRTC backend must expose an **authenticated DTLS channel peer certifi
 - `cargo clippy --manifest-path crates/host/Cargo.toml --all-targets -- -D warnings` **PASS exit0**, `termrun_074027d53c3b47a1b8491ee68d6d723c`.
 - `cargo fmt --manifest-path crates/host/Cargo.toml -- --check` **PASS exit0**, `termrun_13016231145644d8b17caf36b65b1f18`.
 - Final `cargo check --manifest-path crates/host/Cargo.toml` **PASS exit0**, `termrun_861c871130db4566aed99fc9bfb1a942`.
-- Governed Git publication of **six** owned files: pending separate stage/commit/push receipts. No unauthorized path was staged.
+- Governed Git FIFO staged exactly **six** owned files (`crates/host/src/{admission,boundary,error,ingress,lib}.rs`, `workplan/workers/R6-HOST.md`); source+initial worker receipt commit **`a24e5488bf31`** (`feat(host): validate authenticated control ingress and exact channel teardown`) pushed to `origin/main` at 2026-10-30 23:44:40 UTC. Post-push Git summary: branch `main`, ahead **0**, behind **0**; all remaining dirty/untracked paths belong to other workers/parent and are preserved. This docs-only closure records the SHA.
 - M1 physical A01–A17: **NOT RUN**. No APK, installer, OS-local approval, authenticated DataChannel, native input or captured video was accepted. No M1 release readiness claim.
 
 ## Remaining gates
 
-1. Publish only the six owned files to `main` using governed Git FIFO; verify `origin/main` ahead=0 behind=0.
-2. Parent to coordinate a reviewed Windows OS status/consent native library, live encrypted DataChannel identity/binding API, host+control cross-crate wiring, firewall tests, and physical A01–A17 acceptance. No test fixture counts as native authority.
+1. Production still needs vetted Windows user-session/desktop observation and host-owned OS-local consent callback provenance, followed by encrypted DTLS/DataChannel peer identity and crypto binding to enrollment. Bootstrap stays DISABLED.
+2. Parent must coordinate host+control cross-crate wiring, firewall and input release integration, then physical A01–A17 acceptance. No test fixture counts as native authority.
