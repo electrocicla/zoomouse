@@ -1,0 +1,25 @@
+[package]
+name = "zoomouse-capture"
+version = "0.1.0"
+edition = "2021"
+description = "Consent-scoped Windows Graphics Capture user-session foundation"
+license = "MIT"
+publish = false
+
+[lib]
+name = "zoomouse_capture"
+path = "src/lib.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+  "Foundation",
+  "Graphics",
+  "Graphics_Capture",
+  "Graphics_DirectX",
+  "Graphics_DirectX_Direct3D11",
+  "Win32_Foundation",
+  "Win32_UI_Shell",
+] }
+
+[lints.rust]
+unsafe_code = "deny"
