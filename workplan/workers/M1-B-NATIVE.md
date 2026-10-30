@@ -1,0 +1,21 @@
+# Zoomouse M1-B-NATIVE — Android LAN / native build-readiness
+
+Task `deployment-child-530511a9632b0394b27d6c8baf82482e`; instance `web-child-530511a9632b0394b27d6c8baf82482e`; parent `zoomouse-hourly-20261030-2216-orch`. Verified root13 **Zoomouse**, `github.com/electrocicla/zoomouse`, branch `main`, initial HEAD `25ac4392893a` origin/main 0/0. Existing M1-B scaffold `435c7ded` and log `37ef9d74` retained.
+
+## Plan/cascade and boundaries
+Read `docs/{ARCHITECTURE,ROADMAP}.md`, `workplan/{PLAN,TASKS,ACCEPTANCE-M1}.md`, mobile README/package/scripts, native Android manifests/build/settings, domain `network/session/transport`, screens/tests, and shared `packages/protocol/src/pairing-wire.ts`. Plan: inspect native SDK/JDK/wrapper; implement only safe app-local discovery/manual-IP/QR candidate seams; verify strict typing, lint/tests; scope Git publication. No edits outside `apps/mobile/**` and this log.
+
+## Source (commit `83fafb205dbd`)
+- `apps/mobile/src/domain/lan-bootstrap.ts`: RFC1918 IPv4+explicit port manual candidate; untrusted mDNS hint validation; strict IPv4 QR v1 host-public-key pin parser; malformed, public, duplicate/unknown, percent-encoded, all-zero-key, oversize and noncanonical inputs rejected. QR pin **is not a signature/consent**, and IPv6 ULA still requires native implementation. Exhaustive candidate input gate remains false.
+- `apps/mobile/src/domain/lan-bootstrap.test.ts`: 55 new positive/negative cases. Previous transport remains unavailable, `isInputAuthorized` deny-all, and Android release manifest has no INTERNET/camera/nearby permission. No sockets, native crypto, camera scanning, discovery, pairing, grants, consent, DataChannel or remote input. Source Git push receipt `origin/main` `90206ee -> 83fafb2`, before this documentation-only commit.
+
+## Command receipts (tracked PowerShell, `I:\Zoomouse`)
+- JDK/SDK/wrapper probe `termrun_f6eacd2a1b7849cba74e25704c1a836b`: exit0; Android Studio JBR **21.0.6**; Android SDK local platforms **35/36 only**, SDK37 missing, `ANDROID_HOME` and `ANDROID_SDK_ROOT` unset; no global Gradle, `gradlew.bat`, `gradle-wrapper.jar` or debug APK.
+- Post-fix `pnpm --filter @zoomouse/mobile typecheck`: `termrun_7ece8f55076a477cb981083f8c030fda`, **exit0**.
+- Post-fix `pnpm --filter @zoomouse/mobile test`: `termrun_524250d01bf94140b67b662b7b0850c5`, **exit0**, **4 files / 77 tests** (55 new).
+- Post-fix `pnpm --filter @zoomouse/mobile lint`: `termrun_6117d4ab481e4773af7475e2b0cc148d`, **exit0**. First lint `termrun_8b5fdb50bdaa47bab6cc2ca851d9e564` exit1 from unused `_candidate`, fixed with exhaustive switch, then clean rerun.
+
+## Native build BLOCKED (no fabricated APK)
+Project specifies compileSdk **37**, build-tools **37.0.0**, targetSdk **36**, minSdk **24**, NDK **28.2.13676358**. Expected command `apps/mobile/android> .\gradlew.bat :app:assembleDebug` **NOT RUN**: wrapper script and verified JAR are absent, SDK platform37 missing. Also unverified: build-tools37/NDK installation, Gradle distribution/checksums, RN/AGP compatibility, SDK licenses, APK build/install. Provision official Android SDK37 and needed toolchain; generate the Gradle wrapper with official `gradle :wrapper` from trusted installation/template and verify checksums. Parent owns root lockfile; install frozen dependencies and run tracked assembleDebug + physical install after prerequisites. References: https://docs.gradle.org/current/userguide/gradle_wrapper.html ; https://reactnative.dev/docs/set-up-your-environment ; https://developer.android.com/privacy-and-security/local-network-permission .
+
+Security: do not add release INTERNET or camera prematurely. Later native LAN needs key-bound authenticated sessions, user-visible Windows approval, revocation/release held input and separate permission review. Android17 target SDK37 requires ACCESS_LOCAL_NETWORK runtime permission or system-mediated picker; current target36 does not. **A01–A17 ALL NOT RUN**, individually A01 A02 A03 A04 A05 A06 A07 A08 A09 A10 A11 A12 A13 A14 A15 A16 A17. No Android↔Windows physical E2E, native Windows installer, video, performance or authenticated input acceptance. All peer/foreign dirty paths preserved; docs commit/push and parent notification recorded through Agents Global.
