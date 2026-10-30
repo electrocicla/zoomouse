@@ -37,6 +37,15 @@ M0 UI/protocol baseline (complete)
 | M2-B | Independent D3D11 GPU crop/scale + H.264 Media Foundation media source foundation; actual WGC/WebRTC integration gated | NEW `crates/media/**` and own worker log | M1-D-LIVE and M1-E, no overlapping source |
 | M2-C | Pure, deterministic cursor-follow viewport geometry, zoom/follow/stream toggle semantics, finite/negative-origin/DPI-aware crop transforms; native video mapping separately gated | NEW `crates/viewport/**` and own worker log | M2-B published source; independent of Android/Windows dirty paths |
 
+## R6 integration wave — after source-only M1-E / M1-D-LIVE2 / M1-B-NATIVE publication
+
+- **R6-WIN:** exclusive `apps/windows/**` and `workplan/workers/R6-WIN.md`. Improve Tauri user-session tray/consent presentation and truthful IPC without constructing local approval or DTLS identity from renderer/network data. Must remain fail-closed until native OS-local callback provenance is established.
+- **R6-ANDROID:** exclusive `apps/mobile/**` and `workplan/workers/R6-ANDROID.md`. Validate SDK37/Gradle wrapper build prerequisites and advance typed private-LAN session transport, with input disabled until cryptographic channel binding and host approval are real.
+- **R6-HOST (planned):** exclusive `crates/host/**` and `workplan/workers/R6-HOST.md`. Audit/implement actual trusted encrypted transport and native authority seam where supported; never expose current plaintext TCP test adapter or mint approval receipts from remote input.
+- Parent exclusively owns root package/lockfile/.gitignore, shared workplan files and Git integration. The pre-existing uncommitted M2-B worker log and untracked M2-C worker log are **worker-owned preservation**, not parent staging targets.
+- Integration order: trusted Windows OS-local approval + authenticated DTLS channel → host session authorization/revoke → Android transport and input adapter → native build artifacts → A01–A17 physical E2E → real WGC/D3D11/H264/WebRTC → M2 performance → M3/M4. Independent source work may proceed in parallel, but never mark physical gates accepted from unit tests.
+- Known native blockers: Android SDK37 and Gradle wrapper BAT/JAR absent, no debug APK; Windows installer not verified; media and viewport are fail-closed foundations without video output. Do not broaden network exposure or enable remote input to circumvent these gates.
+
 Avoid concurrent edits to root `package.json`, `pnpm-lock.yaml`, `tsconfig.base.json`, CI or shared contracts. Only parent integrates shared root config/lockfile after child proposals. Workers may commit path-scoped changes; Git FIFO serializes publication, not code design.
 
 ## Release gates / exit criteria
