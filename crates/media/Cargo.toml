@@ -1,0 +1,17 @@
+[package]
+name = "zoomouse-media"
+version = "0.1.0"
+edition = "2021"
+description = "Fail-closed Windows GPU media admission and encoder contracts"
+license = "MIT"
+publish = false
+
+[lib]
+name = "zoomouse_media"
+path = "src/lib.rs"
+
+[dependencies]
+zoomouse-capture = { path = "../capture" }
+
+[lints.rust]
+unsafe_code = "deny"
