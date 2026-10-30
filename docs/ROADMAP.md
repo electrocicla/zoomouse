@@ -3,8 +3,8 @@
 ## M0: foundation & interactive preview
 - [x] Inspect source Android screenshots and map feature inventory.
 - [x] Inspect authorized MK059 workspace `I:\Zoomouse`; design architecture.
-- [ ] Initialize Git, create *public* `electrocicla/zoomouse`, commit/push and verify remote (accept only observed evidence).
-- [ ] Build pnpm, strict TypeScript contracts, simulated React UI preview, unit tests, execute `pnpm check`.
+- [x] Initialize Git, create *public* `electrocicla/zoomouse`, commit/push and verify remote (observed).
+- [x] Build pnpm, strict TypeScript contracts, simulated React UI preview, unit tests, execute `pnpm check` (5 passing tests, successful preview build).
 Exit criteria: CI-ready runnable preview; no claim of real Android/Windows control.
 
 ## M1: secure LAN input
