@@ -28,9 +28,11 @@ M0 UI/protocol baseline (complete)
 | M1-A | wire safety, packet/session validation, test fixtures, sequence/replay policy | `packages/protocol/`; own worker log | M1-B, M1-C |
 | M1-B | Android RN bootstrap, typed navigation/control UI shell, permissions placeholders truthfully labeled | `apps/mobile/`; own worker log | M1-A, M1-C |
 | M1-C | Windows native host/tray bootstrap; no Session 0 service or elevation | `apps/windows/`, `crates/host/`; own worker log | M1-A, M1-B |
-| M1-D | peer discovery, pairing, identity, explicit host approval and revocation; needs review of A/B/C contracts | owned modules assigned after A–C | limited |
-| M1-E | trusted input messages + input injection, release on disconnect, rate bounds; requires D | owned modules assigned after D | limited |
-| M1-F | device E2E, metrics/security gate and host/Android packaging | tests and docs assigned after E | integration only |
+| M1-D | Ed25519 host/phone pairing identity, source-bound challenge, local enrollment and revocation; crypto substrate published | `crates/host/**`; original M1-D worker log | M1-D-WIRE |
+| M1-D-WIRE | Strict versioned TS↔Rust hello/challenge/proof JSON and transcript vectors; source published | `packages/protocol/**`; own worker log | M1-D |
+| M1-D-LIVE | Native private-LAN listener, mDNS/IP/QR bootstrap, host-observed endpoint and trusted local consent plumbing; never public listener | `crates/host/**` after M1-D closure; own worker log | M1-E source foundation |
+| M1-E | Independently testable Windows native input executor and DataChannel boundary; actual dispatch remains behind trusted HostSession/consent | NEW `crates/control/**` and own worker log; later host integration coordinated | M1-D-LIVE |
+| M1-F | Real Android↔Win11 physical A01–A17, native packaging, reconnect/revoke/performance evidence | integration/QA ownership assigned after M1-B/C/D-LIVE/E | integration only |
 
 Avoid concurrent edits to root `package.json`, `pnpm-lock.yaml`, `tsconfig.base.json`, CI or shared contracts. Only parent integrates shared root config/lockfile after child proposals. Workers may commit path-scoped changes; Git FIFO serializes publication, not code design.
 
