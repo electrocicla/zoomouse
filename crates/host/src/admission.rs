@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use crate::boundary::{AuthenticatedPeer, DesktopContext, HostSession};
 use crate::consent::{ConsentPhase, ConsentRequest, LocalDecision};
 use crate::error::HostError;
+use crate::ingress::IngressGate;
 use crate::input::{InputAction, InputBackend};
 use crate::lan::PrivateLanEndpoint;
 use crate::pairing::{
@@ -49,6 +50,18 @@ pub(crate) struct NativeApprovalReceipt {
     decision: LocalDecision,
 }
 
+/// A decoded input frame from the SAME authenticated encrypted channel.
+/// The host must obtain wire_bytes from the actual decoder and sequence from
+/// the authenticated frame, never a caller-supplied JSON length or IPC claim.
+/// No production constructor exists while the DTLS adapter is absent.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VerifiedInputFrame {
+    channel: VerifiedChannelEvidence,
+    sequence: u64,
+    wire_bytes: usize,
+    action: InputAction,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootstrapStatus {
     /// Private-LAN descriptors and test-only TCP parsing are NOT live service.
@@ -64,6 +77,7 @@ pub struct HostAdmission<B: InputBackend> {
     host: HostSession<B>,
     pending_channel: Option<VerifiedChannelEvidence>,
     active_channel: Option<VerifiedChannelEvidence>,
+    ingress: Option<IngressGate>,
 }
 
 impl<B: InputBackend> HostAdmission<B> {
@@ -73,6 +87,7 @@ impl<B: InputBackend> HostAdmission<B> {
             host: HostSession::new(backend),
             pending_channel: None,
             active_channel: None,
+            ingress: None,
         })
     }
 
@@ -205,14 +220,60 @@ impl<B: InputBackend> HostAdmission<B> {
             self.host.revoke()?;
             return Ok(());
         }
+        self.ingress = Some(IngressGate::default());
         self.active_channel = Some(pending);
         Ok(())
     }
 
-    /// Call ONLY on frames from the same authenticated encrypted channel.
+    /// Future DataChannel decoder's sole inbound route. Sequence, exact byte
+    /// length, action and monotonic local rate limits are checked BEFORE any
+    /// native input is passed to the existing consent/desktop gate.
+    #[allow(dead_code)]
+    pub(crate) fn dispatch_verified_frame(
+        &mut self,
+        frame: &VerifiedInputFrame,
+        desktop: &DesktopContext,
+        now: Instant,
+    ) -> Result<(), HostError> {
+        if self.active_channel.as_ref() != Some(&frame.channel) {
+            return Err(HostError::WrongSession);
+        }
+        let next = self.ingress.as_ref().ok_or(HostError::Unauthorized)?.next(
+            frame.sequence,
+            frame.wire_bytes,
+            &frame.action,
+            now,
+        );
+        let next = match next {
+            Ok(value) => value,
+            Err(error) => {
+                self.emergency_stop()?;
+                return Err(error);
+            }
+        };
+        let result = self.dispatch_core(&frame.channel, desktop, &frame.action, now);
+        if result.is_ok() {
+            self.ingress = Some(next);
+        }
+        result
+    }
+
+    /// Existing test fixtures exercise identity, consent and cleanup directly.
+    /// Deliberately absent from non-test builds: no bare InputAction bypass.
+    #[cfg(test)]
+    fn dispatch(
+        &mut self,
+        channel: &VerifiedChannelEvidence,
+        desktop: &DesktopContext,
+        input: &InputAction,
+        now: Instant,
+    ) -> Result<(), HostError> {
+        self.dispatch_core(channel, desktop, input, now)
+    }
+
     /// A second device, changed session, stale pairing or locked desktop
     /// cannot borrow the previous local consent.
-    pub(crate) fn dispatch(
+    fn dispatch_core(
         &mut self,
         channel: &VerifiedChannelEvidence,
         desktop: &DesktopContext,
@@ -246,6 +307,7 @@ impl<B: InputBackend> HostAdmission<B> {
         if result.is_err() && self.host.phase() == ConsentPhase::Revoked {
             self.pairing.revoke(&channel.device_id);
             self.active_channel = None;
+            self.ingress = None;
         }
         result
     }
@@ -262,6 +324,7 @@ impl<B: InputBackend> HostAdmission<B> {
         if owns_session {
             self.active_channel = None;
             self.pending_channel = None;
+            self.ingress = None;
             self.host.revoke()?;
         }
         Ok(())
@@ -273,15 +336,21 @@ impl<B: InputBackend> HostAdmission<B> {
             self.pairing.revoke(&channel.device_id);
         }
         self.pending_channel = None;
+        self.ingress = None;
         self.host.revoke()
     }
 
-    pub fn channel_disconnected(&mut self, channel: &str) -> Result<(), HostError> {
+    /// Transport close notifications must identify the exact authenticated
+    /// channel; a guessable string alone cannot disconnect another device.
+    pub(crate) fn channel_disconnected(
+        &mut self,
+        channel: &VerifiedChannelEvidence,
+    ) -> Result<(), HostError> {
         let matching = self
             .active_channel
             .as_ref()
             .or(self.pending_channel.as_ref())
-            .is_some_and(|current| current.channel_binding_id == channel);
+            .is_some_and(|current| current == channel);
         if matching {
             self.emergency_stop()?;
         }
@@ -508,7 +577,7 @@ mod tests {
             ),
             Ok(())
         );
-        host.channel_disconnected(&channel.channel_binding_id)
+        host.channel_disconnected(&channel)
             .expect("disconnect cleanup");
         assert_eq!(host.phase(), ConsentPhase::Revoked);
         assert_eq!(
@@ -602,5 +671,145 @@ mod tests {
         assert!(host
             .request_session(channel, &desktop(false), "Phone".into(), now)
             .is_err());
+    }
+    fn frame(
+        channel: &VerifiedChannelEvidence,
+        sequence: u64,
+        wire_bytes: usize,
+        action: InputAction,
+    ) -> VerifiedInputFrame {
+        VerifiedInputFrame {
+            channel: channel.clone(),
+            sequence,
+            wire_bytes,
+            action,
+        }
+    }
+
+    #[test]
+    fn encrypted_frame_seam_rejects_replay_and_releases_before_more_input() {
+        let now = Instant::now();
+        let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+        let channel = approved(&mut host, now);
+        let first = frame(&channel, 1, 40, InputAction::Text("ok".into()));
+        assert_eq!(
+            host.dispatch_verified_frame(&first, &desktop(false), now),
+            Ok(())
+        );
+        assert_eq!(host.host.test_backend().count, 1);
+        assert_eq!(
+            host.dispatch_verified_frame(&first, &desktop(false), now),
+            Err(HostError::InvalidFrame)
+        );
+        assert_eq!(host.host.test_backend().count, 1);
+        assert_eq!(host.host.test_backend().releases, 1);
+        assert_eq!(host.phase(), ConsentPhase::Revoked);
+        assert_eq!(
+            host.dispatch_verified_frame(
+                &frame(&channel, 2, 40, InputAction::Text("x".into())),
+                &desktop(false),
+                now
+            ),
+            Err(HostError::WrongSession)
+        );
+        assert!(host
+            .request_session(channel, &desktop(false), "retry".into(), now)
+            .is_err());
+    }
+
+    #[test]
+    fn truncated_wire_length_and_invalid_action_revoke_before_dispatch() {
+        for (length, action) in [
+            (0, InputAction::Text("x".into())),
+            (4097, InputAction::Text("x".into())),
+            (
+                40,
+                InputAction::PointerDelta {
+                    dx: f64::NAN,
+                    dy: 0.0,
+                },
+            ),
+        ] {
+            let now = Instant::now();
+            let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+            let channel = approved(&mut host, now);
+            assert_eq!(
+                host.dispatch_verified_frame(
+                    &frame(&channel, 1, length, action),
+                    &desktop(false),
+                    now
+                ),
+                Err(HostError::InvalidFrame)
+            );
+            assert_eq!(host.host.test_backend().count, 0);
+            assert_eq!(host.host.test_backend().releases, 1);
+            assert_eq!(host.phase(), ConsentPhase::Revoked);
+        }
+    }
+
+    #[test]
+    fn foreign_disconnect_or_frame_cannot_steal_active_session() {
+        let now = Instant::now();
+        let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+        let channel = approved(&mut host, now);
+        let mut foreign = channel.clone();
+        foreign.device_id = "foreign-device-identity-1234567890".into();
+        host.channel_disconnected(&foreign)
+            .expect("unrelated disconnect ignored");
+        assert_eq!(host.phase(), ConsentPhase::Approved);
+        assert_eq!(
+            host.dispatch_verified_frame(
+                &frame(&foreign, 1, 40, InputAction::Text("x".into())),
+                &desktop(false),
+                now
+            ),
+            Err(HostError::WrongSession)
+        );
+        assert_eq!(host.host.test_backend().count, 0);
+        assert_eq!(host.host.test_backend().releases, 0);
+        assert_eq!(
+            host.dispatch_verified_frame(
+                &frame(&channel, 1, 40, InputAction::Text("accepted".into())),
+                &desktop(false),
+                now
+            ),
+            Ok(())
+        );
+        host.channel_disconnected(&channel)
+            .expect("matching disconnect");
+        assert_eq!(host.host.test_backend().releases, 1);
+        assert_eq!(host.phase(), ConsentPhase::Revoked);
+    }
+
+    #[test]
+    fn input_rate_exceeded_releases_and_revokes_enrollment() {
+        let now = Instant::now();
+        let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+        let channel = approved(&mut host, now);
+        for sequence in 1..=60 {
+            let action = InputAction::PointerDelta { dx: 1.0, dy: 1.0 };
+            host.dispatch_verified_frame(
+                &frame(&channel, sequence, 32, action),
+                &desktop(false),
+                now,
+            )
+            .expect("within frame budget");
+        }
+        assert_eq!(
+            host.dispatch_verified_frame(
+                &frame(
+                    &channel,
+                    61,
+                    32,
+                    InputAction::PointerDelta { dx: 1.0, dy: 1.0 }
+                ),
+                &desktop(false),
+                now
+            ),
+            Err(HostError::InvalidFrame)
+        );
+        assert_eq!(host.host.test_backend().count, 60);
+        assert_eq!(host.host.test_backend().releases, 1);
+        assert_eq!(host.phase(), ConsentPhase::Revoked);
     }
 }

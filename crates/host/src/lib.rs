@@ -10,6 +10,8 @@ pub mod boundary;
 pub mod consent;
 pub mod error;
 pub mod input;
+// No production encrypted DataChannel adapter: only crate-private safety checks.
+mod ingress;
 pub mod lan;
 pub mod pairing;
 // No Tauri/runtime entrypoint: plaintext pairing is intentionally inaccessible.

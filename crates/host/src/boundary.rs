@@ -139,6 +139,12 @@ impl<B: InputBackend> HostSession<B> {
         self.cleanup_failed
     }
 
+    /// Internal test-only observation; never expose the input backend in production.
+    #[cfg(test)]
+    pub(crate) fn test_backend(&self) -> &B {
+        &self.backend
+    }
+
     pub fn dispatch(
         &mut self,
         peer: &AuthenticatedPeer,
