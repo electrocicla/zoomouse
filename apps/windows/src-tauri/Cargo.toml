@@ -1,0 +1,27 @@
+[package]
+name = "zoomouse-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Zoomouse Windows 11 interactive desktop tray and settings shell"
+license = "MIT"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "zoomouse_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zoomouse-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+zoomouse-host = { path = "../../../crates/host" }
+
+[lints.rust]
+unsafe_code = "forbid"

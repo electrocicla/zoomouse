@@ -1,0 +1,14 @@
+[package]
+name = "zoomouse-host"
+version = "0.1.0"
+edition = "2021"
+description = "Deny-by-default interactive user-session host boundary for Zoomouse"
+license = "MIT"
+publish = false
+
+[lib]
+name = "zoomouse_host"
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
