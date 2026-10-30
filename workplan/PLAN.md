@@ -32,8 +32,10 @@ M0 UI/protocol baseline (complete)
 | M1-D-WIRE | Strict versioned TS↔Rust hello/challenge/proof JSON and transcript vectors; source published | `packages/protocol/**`; own worker log | M1-D |
 | M1-D-LIVE | Native private-LAN listener, mDNS/IP/QR bootstrap, host-observed endpoint and trusted local consent plumbing; never public listener | `crates/host/**` after M1-D closure; own worker log | M1-E source foundation |
 | M1-E | Independently testable Windows native input executor and DataChannel boundary; actual dispatch remains behind trusted HostSession/consent | NEW `crates/control/**` and own worker log; later host integration coordinated | M1-D-LIVE |
+| M1-D-LIVE2 | Next host-only security integration: explicit local approval/session binding/revocation hooks and private LAN lifecycle, fail-closed until trusted transport and native consent are real | `crates/host/**` and NEW `workplan/workers/M1-D-LIVE2.md` only; separate from M1-E | M1-E recovery (separate ownership) |
 | M1-F | Real Android↔Win11 physical A01–A17, native packaging, reconnect/revoke/performance evidence | integration/QA ownership assigned after M1-B/C/D-LIVE/E | integration only |
 | M2-B | Independent D3D11 GPU crop/scale + H.264 Media Foundation media source foundation; actual WGC/WebRTC integration gated | NEW `crates/media/**` and own worker log | M1-D-LIVE and M1-E, no overlapping source |
+| M2-C | Pure, deterministic cursor-follow viewport geometry, zoom/follow/stream toggle semantics, finite/negative-origin/DPI-aware crop transforms; native video mapping separately gated | NEW `crates/viewport/**` and own worker log | M2-B published source; independent of Android/Windows dirty paths |
 
 Avoid concurrent edits to root `package.json`, `pnpm-lock.yaml`, `tsconfig.base.json`, CI or shared contracts. Only parent integrates shared root config/lockfile after child proposals. Workers may commit path-scoped changes; Git FIFO serializes publication, not code design.
 
