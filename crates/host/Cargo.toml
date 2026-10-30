@@ -10,5 +10,10 @@ publish = false
 name = "zoomouse_host"
 path = "src/lib.rs"
 
+[dependencies]
+ed25519-dalek = { version = "2.2", default-features = false, features = ["std"] }
+getrandom = "0.2"
+sha2 = "0.10"
+
 [lints.rust]
 unsafe_code = "forbid"

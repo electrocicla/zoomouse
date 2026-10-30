@@ -20,20 +20,32 @@ impl AuthenticatedPeer {
         session_id: String,
         transport_binding_id: String,
     ) -> Result<Self, HostError> {
-        if [device_id.as_str(), session_id.as_str(), transport_binding_id.as_str()]
-            .iter()
-            .any(|id| id.len() < 16 || id.len() > 128)
+        if [
+            device_id.as_str(),
+            session_id.as_str(),
+            transport_binding_id.as_str(),
+        ]
+        .iter()
+        .any(|id| id.len() < 16 || id.len() > 128)
         {
             return Err(HostError::Unauthorized);
         }
-        Ok(Self { device_id, session_id, transport_binding_id })
+        Ok(Self {
+            device_id,
+            session_id,
+            transport_binding_id,
+        })
     }
 
     #[must_use]
-    pub fn device_id(&self) -> &str { &self.device_id }
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
 
     #[must_use]
-    pub fn session_id(&self) -> &str { &self.session_id }
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
 }
 
 /// OS-observed user-session state: no public constructor to spoof it from IPC.
@@ -54,14 +66,22 @@ impl DesktopContext {
         if user_session_id.trim().is_empty() {
             return Err(HostError::DesktopUnavailable);
         }
-        Ok(Self { user_session_id, interactive, locked })
+        Ok(Self {
+            user_session_id,
+            interactive,
+            locked,
+        })
     }
 
     #[must_use]
-    pub fn user_session_id(&self) -> &str { &self.user_session_id }
+    pub fn user_session_id(&self) -> &str {
+        &self.user_session_id
+    }
 
     #[must_use]
-    pub fn can_receive_input(&self) -> bool { self.interactive && !self.locked }
+    pub fn can_receive_input(&self) -> bool {
+        self.interactive && !self.locked
+    }
 }
 
 /// Sole boundary for remote input. Revocation precedes cleanup; a release
@@ -75,7 +95,11 @@ pub struct HostSession<B: InputBackend> {
 impl<B: InputBackend> HostSession<B> {
     #[must_use]
     pub fn new(backend: B) -> Self {
-        Self { consent: ConsentController::default(), backend, cleanup_failed: false }
+        Self {
+            consent: ConsentController::default(),
+            backend,
+            cleanup_failed: false,
+        }
     }
 
     #[must_use]
@@ -148,7 +172,8 @@ mod tests {
             "device-identity-0001".into(),
             "session-identity-0001".into(),
             binding.into(),
-        ).expect("valid test identity")
+        )
+        .expect("valid test identity")
     }
 
     fn desktop(interactive: bool, locked: bool) -> DesktopContext {
@@ -166,31 +191,50 @@ mod tests {
 
     impl InputBackend for SpyBackend {
         fn dispatch(&mut self, _action: &InputAction) -> Result<(), HostError> {
-            if self.fail_dispatch { return Err(HostError::NativeInputFailed); }
+            if self.fail_dispatch {
+                return Err(HostError::NativeInputFailed);
+            }
             self.actions += 1;
             Ok(())
         }
         fn release_all(&mut self) -> Result<(), HostError> {
             self.releases += 1;
-            if self.fail_release { Err(HostError::CleanupFailed) } else { Ok(()) }
+            if self.fail_release {
+                Err(HostError::CleanupFailed)
+            } else {
+                Ok(())
+            }
         }
     }
 
     fn grant(session: &mut HostSession<SpyBackend>, now: Instant) {
-        session.consent.begin_authenticated_request(
-            peer("transport-binding-0001"), &desktop(true, false), "Phone".into()
-        ).expect("request");
-        session.consent.decide_locally(
-            LocalDecision::Approve, &desktop(true, false), now, Duration::from_secs(90)
-        ).expect("approved locally");
+        session
+            .consent
+            .begin_authenticated_request(
+                peer("transport-binding-0001"),
+                &desktop(true, false),
+                "Phone".into(),
+            )
+            .expect("request");
+        session
+            .consent
+            .decide_locally(
+                LocalDecision::Approve,
+                &desktop(true, false),
+                now,
+                Duration::from_secs(90),
+            )
+            .expect("approved locally");
     }
 
     #[test]
     fn no_implicit_approval_or_input_on_start() {
         let mut host = HostSession::new(SpyBackend::default());
         let error = host.dispatch(
-            &peer("transport-binding-0001"), &desktop(true, false),
-            &InputAction::Text("secret".into()), Instant::now()
+            &peer("transport-binding-0001"),
+            &desktop(true, false),
+            &InputAction::Text("secret".into()),
+            Instant::now(),
         );
         assert_eq!(error, Err(HostError::Unauthorized));
         assert_eq!(host.backend.actions, 0);
@@ -201,14 +245,30 @@ mod tests {
     fn pending_consent_is_denied_and_local_rejection_is_terminal() {
         let now = Instant::now();
         let mut host = HostSession::new(SpyBackend::default());
-        host.consent.begin_authenticated_request(
-            peer("transport-binding-0001"), &desktop(true, false), "Phone".into()
-        ).expect("request");
-        assert_eq!(host.dispatch(&peer("transport-binding-0001"), &desktop(true, false),
-            &InputAction::Text("x".into()), now), Err(HostError::ApprovalPending));
-        host.consent.decide_locally(
-            LocalDecision::Deny, &desktop(true, false), now, Duration::from_secs(60)
-        ).expect("rejected");
+        host.consent
+            .begin_authenticated_request(
+                peer("transport-binding-0001"),
+                &desktop(true, false),
+                "Phone".into(),
+            )
+            .expect("request");
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Text("x".into()),
+                now
+            ),
+            Err(HostError::ApprovalPending)
+        );
+        host.consent
+            .decide_locally(
+                LocalDecision::Deny,
+                &desktop(true, false),
+                now,
+                Duration::from_secs(60),
+            )
+            .expect("rejected");
         assert_eq!(host.phase(), ConsentPhase::Revoked);
         assert_eq!(host.backend.actions, 0);
     }
@@ -218,16 +278,37 @@ mod tests {
         let now = Instant::now();
         let mut host = HostSession::new(SpyBackend::default());
         grant(&mut host, now);
-        assert_eq!(host.dispatch(&peer("transport-binding-9999"), &desktop(true, false),
-            &InputAction::Text("wrong binding".into()), now), Err(HostError::WrongSession));
-        assert_eq!(host.dispatch(&peer("transport-binding-0001"), &desktop(true, false),
-            &InputAction::Text("accepted".into()), now), Ok(()));
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-9999"),
+                &desktop(true, false),
+                &InputAction::Text("wrong binding".into()),
+                now
+            ),
+            Err(HostError::WrongSession)
+        );
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Text("accepted".into()),
+                now
+            ),
+            Ok(())
+        );
         assert_eq!(host.backend.actions, 1);
         host.revoke().expect("release");
         assert_eq!(host.phase(), ConsentPhase::Revoked);
         assert_eq!(host.backend.releases, 1);
-        assert_eq!(host.dispatch(&peer("transport-binding-0001"), &desktop(true, false),
-            &InputAction::Text("blocked".into()), now), Err(HostError::Revoked));
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Text("blocked".into()),
+                now
+            ),
+            Err(HostError::Revoked)
+        );
     }
 
     #[test]
@@ -236,8 +317,15 @@ mod tests {
         let mut host = HostSession::new(SpyBackend::default());
         grant(&mut host, now);
         let after_expiry = now + Duration::from_secs(91);
-        assert_eq!(host.dispatch(&peer("transport-binding-0001"), &desktop(true, false),
-            &InputAction::Text("blocked".into()), after_expiry), Err(HostError::Expired));
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Text("blocked".into()),
+                after_expiry
+            ),
+            Err(HostError::Expired)
+        );
         assert_eq!(host.phase(), ConsentPhase::Revoked);
         assert_eq!(host.backend.releases, 1);
         assert_eq!(host.backend.actions, 0);
@@ -248,8 +336,15 @@ mod tests {
         let now = Instant::now();
         let mut host = HostSession::new(SpyBackend::default());
         grant(&mut host, now);
-        assert_eq!(host.dispatch(&peer("transport-binding-0001"), &desktop(true, true),
-            &InputAction::Text("blocked".into()), now), Err(HostError::DesktopUnavailable));
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, true),
+                &InputAction::Text("blocked".into()),
+                now
+            ),
+            Err(HostError::DesktopUnavailable)
+        );
         assert_eq!(host.phase(), ConsentPhase::Revoked);
         assert_eq!(host.backend.releases, 1);
     }
@@ -257,7 +352,10 @@ mod tests {
     #[test]
     fn cleanup_failure_keeps_session_revoked() {
         let now = Instant::now();
-        let mut host = HostSession::new(SpyBackend { fail_release: true, ..SpyBackend::default() });
+        let mut host = HostSession::new(SpyBackend {
+            fail_release: true,
+            ..SpyBackend::default()
+        });
         grant(&mut host, now);
         assert_eq!(host.revoke(), Err(HostError::CleanupFailed));
         assert_eq!(host.phase(), ConsentPhase::Revoked);
@@ -268,10 +366,20 @@ mod tests {
     #[test]
     fn dispatch_failure_forces_release_and_revoke() {
         let now = Instant::now();
-        let mut host = HostSession::new(SpyBackend { fail_dispatch: true, ..SpyBackend::default() });
+        let mut host = HostSession::new(SpyBackend {
+            fail_dispatch: true,
+            ..SpyBackend::default()
+        });
         grant(&mut host, now);
-        assert_eq!(host.dispatch(&peer("transport-binding-0001"), &desktop(true, false),
-            &InputAction::Text("unsafe".into()), now), Err(HostError::NativeInputFailed));
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Text("unsafe".into()),
+                now
+            ),
+            Err(HostError::NativeInputFailed)
+        );
         assert_eq!(host.phase(), ConsentPhase::Revoked);
         assert_eq!(host.backend.releases, 1);
     }
@@ -288,11 +396,22 @@ mod tests {
     fn invalid_local_lease_cannot_grant_consent() {
         let now = Instant::now();
         let mut host = HostSession::new(SpyBackend::default());
-        host.consent.begin_authenticated_request(
-            peer("transport-binding-0001"), &desktop(true, false), "Phone".into()
-        ).expect("request");
-        assert_eq!(host.consent.decide_locally(LocalDecision::Approve, &desktop(true, false),
-            now, Duration::from_secs(601)), Err(HostError::InvalidApproval));
+        host.consent
+            .begin_authenticated_request(
+                peer("transport-binding-0001"),
+                &desktop(true, false),
+                "Phone".into(),
+            )
+            .expect("request");
+        assert_eq!(
+            host.consent.decide_locally(
+                LocalDecision::Approve,
+                &desktop(true, false),
+                now,
+                Duration::from_secs(601)
+            ),
+            Err(HostError::InvalidApproval)
+        );
         assert_eq!(host.phase(), ConsentPhase::Revoked);
     }
 
@@ -301,12 +420,24 @@ mod tests {
         let now = Instant::now();
         let mut host = HostSession::new(SpyBackend::default());
         grant(&mut host, now);
-        assert_eq!(host.consent.begin_authenticated_request(
-            peer("transport-binding-9999"), &desktop(true, false), "Other".into()
-        ), Err(HostError::InvalidApproval));
+        assert_eq!(
+            host.consent.begin_authenticated_request(
+                peer("transport-binding-9999"),
+                &desktop(true, false),
+                "Other".into()
+            ),
+            Err(HostError::InvalidApproval)
+        );
         assert_eq!(host.phase(), ConsentPhase::Approved);
-        assert_eq!(host.dispatch(&peer("transport-binding-0001"), &desktop(true, false),
-            &InputAction::Text("still current".into()), now), Ok(()));
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Text("still current".into()),
+                now
+            ),
+            Ok(())
+        );
     }
 
     #[test]
@@ -314,11 +445,17 @@ mod tests {
         let now = Instant::now();
         let mut host = HostSession::new(SpyBackend::default());
         grant(&mut host, now);
-        let other = DesktopContext::from_local_os(
-            "windows-user-session-02".into(), true, false
-        ).expect("OS session fixture");
-        assert_eq!(host.dispatch(&peer("transport-binding-0001"), &other,
-            &InputAction::Text("blocked".into()), now), Err(HostError::WrongSession));
+        let other = DesktopContext::from_local_os("windows-user-session-02".into(), true, false)
+            .expect("OS session fixture");
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &other,
+                &InputAction::Text("blocked".into()),
+                now
+            ),
+            Err(HostError::WrongSession)
+        );
         assert_eq!(host.backend.actions, 0);
     }
 
@@ -326,11 +463,22 @@ mod tests {
     fn local_approval_is_revoked_if_desktop_locks_before_decision() {
         let now = Instant::now();
         let mut host = HostSession::new(SpyBackend::default());
-        host.consent.begin_authenticated_request(
-            peer("transport-binding-0001"), &desktop(true, false), "Phone".into()
-        ).expect("request");
-        assert_eq!(host.consent.decide_locally(LocalDecision::Approve, &desktop(true, true),
-            now, Duration::from_secs(60)), Err(HostError::DesktopUnavailable));
+        host.consent
+            .begin_authenticated_request(
+                peer("transport-binding-0001"),
+                &desktop(true, false),
+                "Phone".into(),
+            )
+            .expect("request");
+        assert_eq!(
+            host.consent.decide_locally(
+                LocalDecision::Approve,
+                &desktop(true, true),
+                now,
+                Duration::from_secs(60)
+            ),
+            Err(HostError::DesktopUnavailable)
+        );
         assert_eq!(host.phase(), ConsentPhase::Revoked);
         assert_eq!(host.backend.actions, 0);
     }

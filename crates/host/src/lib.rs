@@ -5,6 +5,8 @@ pub mod boundary;
 pub mod consent;
 pub mod error;
 pub mod input;
+pub mod lan;
+pub mod pairing;
 
 pub use boundary::{AuthenticatedPeer, DesktopContext, HostSession};
 pub use consent::{ConsentController, ConsentPhase, ConsentRequest, LocalDecision};

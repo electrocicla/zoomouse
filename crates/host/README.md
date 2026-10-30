@@ -1,6 +1,6 @@
 # Zoomouse Rust host — M1-C foundation
 
-This crate is a pure Rust, dependency-free, **deny-by-default** user-session security seam. It is not a Windows service, device pairing server, media engine, or Win32 input injector.
+This crate is a Rust-only, **deny-by-default** user-session security seam. The M1-D pairing substrate adds Ed25519 (ed25519-dalek), SHA-256 and OS CSPRNG dependencies, but no listener, input or capture authority. It is not a Windows service, device pairing server, media engine, or Win32 input injector.
 
 ## Modules
 
@@ -12,6 +12,18 @@ This crate is a pure Rust, dependency-free, **deny-by-default** user-session sec
 `HostSession::dispatch` verifies an approved authenticated peer and desktop before touching the backend. Disconnect, emergency stop, lock, expiry or native dispatch failure revokes first and attempts `release_all`. A cleanup failure leaves the session revoked and surfaces `CleanupFailed`.
 
 Local approval is deliberately **unreachable in production** until M1-D supplies a real authenticated pairing adapter, verified Windows session identity and a trusted native consent callback. These internal seams are exercised by pure Rust unit tests; test fixtures do not constitute actual authentication. The shipped `DisabledInput` backend refuses all native events.
+
+
+## M1-D LAN/pairing security substrate (not an active server)
+
+- `lan.rs` only admits private RFC1918 IPv4 / RFC4193 IPv6 ULA endpoints (nonzero port), using a validated constructor with private fields so other modules cannot forge a `PrivateLanEndpoint` via a public struct literal. It emits a versioned `zoomouse://pair/v1` descriptor with **the complete host Ed25519 public key** for a locally displayed QR. It includes no password/token. Manual IP and mDNS-derived names are *locators only*; scan of the native Windows display or independently verified fingerprint must pin the public key. It does not render QR, resolve addresses, register mDNS, bind a network socket, or install a Windows Firewall rule.
+- `pairing.rs` generates a fresh host Ed25519 key from the OS CSPRNG per process lifetime; validates phone public-key claims, signs a domain-separated challenge over both public keys, both nonces, request ID, private source IP/port, enforces one-use proof (invalid, expired and wrong-source proofs consume the request) with 60s TTL and a hard cap of 16 outstanding candidates. A valid phone Ed25519 proof queues a **candidate**, not a connection grant. Local enrollment requires a trusted desktop context and a separate local native decision, expires within 10 minutes, and can be revoked. No state is restored after restart.
+- `HostSession` and `ConsentController` remain separate and deny input. Local *pairing enrollment* by itself NEVER manufactures `AuthenticatedPeer`, approves the separate HostSession input grant, or verifies an encrypted network transport. The production Tauri shell retains `DisabledInput` and no pairing-approval invoke command; mDNS and QR are not advertised as operational.
+- M1-A/M1-B wire-contract request: the current `pairing.intent` transports a claimed ID and nonce **without** public-key proof. Define a separate versioned Ed25519 hello/challenge/proof protocol with deterministic transcript encoding and host public-key pinning; device ID must derive from the key, not a mutable display name. Actual incoming peer IP must come from the transport, not untrusted JSON. The current Rust substrate is an internal draft until interoperable TS/Android fixtures are reviewed.
+- M1-E integration gates: authenticate a real encrypted DTLS/WebRTC channel, cryptographically bind that channel key/transcript to the approved phone key, use a fresh per-session transport binding ID and current consent generation, and call trusted OS-session host consent **before** native input. Revoke must invalidate both pairing and HostSession and attempt native key/button release. Require a verified private interface binding and explicit firewall scope before registering mDNS, serving QR/accepting connections, or claiming LAN availability.
+- Out of scope and unverified: listener/mDNS responder, QR camera/parser, persistent host key management, cross-language protocol fixtures, secure channel, local native consent presentation, Windows network/capture/input E2E. No UAC or Session 0 semantics are introduced.
+
+Run: `cargo test --manifest-path crates/host/Cargo.toml`, `cargo fmt --manifest-path crates/host/Cargo.toml --check` and `cargo check --manifest-path crates/host/Cargo.toml`; these validate the pure substrate only.
 
 ## Focused check
 
