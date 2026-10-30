@@ -34,4 +34,4 @@
 
 ## Publication receipt
 
-Pending exact scoped Git FIFO source+worker-log commit and push; append authenticated commit SHA, remote 0/0 and parent log via Agents Global. Other dirty paths (root configs, Android, M2 docs, control) preserved as separate ownership.
+Scoped SOURCE+worklog commit **`dedaf50a9216`** (`feat(host): add fail-closed native device and session admission`) created through MK059 Git FIFO with **exactly four owned paths**: `crates/host/src/{admission,boundary,lib}.rs` and `workplan/workers/M1-D-LIVE2.md`. Governed push advanced `origin/main` **`857cff5` → `dedaf50`**, verified `main` tracking `origin/main`, **ahead 0 / behind 0**. No unrelated paths staged; remaining dirty `.gitignore`, root `package.json`, `pnpm-lock.yaml`, `workplan/workers/M2-B.md` and untracked `M2-C.md` preserved. This receipt is being appended via a separate **docs-only closure commit**, whose SHA is logged in Agents Global; it must be verified separately.
