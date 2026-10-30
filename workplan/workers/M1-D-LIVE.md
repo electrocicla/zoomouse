@@ -30,7 +30,8 @@
 - 2026-10-30 19:38Z `cargo fmt --manifest-path crates/host/Cargo.toml` `termrun_927dbc5723eb439196e593773724a0cc` **PASS exit 0** after test-call corrections.
 - 2026-10-30 19:38Z serial `cmd.exe /d /s /c "cargo fmt --manifest-path crates/host/Cargo.toml --check && cargo check --manifest-path crates/host/Cargo.toml && cargo clippy --manifest-path crates/host/Cargo.toml --all-targets -- -D warnings && echo M1D_GATES_PASS"` `termrun_b38683036ffc4e56bbf70e5858602eec` **PASS exit 0** with authoritative `M1D_GATES_PASS` marker. All three checks individually executed in this guarded fail-fast shell chain; no Clippy warnings.
 - 2026-10-30 19:38Z `pnpm --filter @zoomouse/protocol test` `termrun_6c2755feba1e44b7b26c4b6fe2a7f1a5` **PASS exit 0**, 4 Vitest files/30 tests including published TS v1 pairing-wire fixtures. This proves independent synthetic wire vectors, **not real Android/native cross-device transport**.
-- Scoped Git FIFO commit/push receipts: **PENDING** until exact publication and upstream verification.
+- 2026-10-30 19:41Z: authorized MK059 Git FIFO path-scoped stage+commit of exactly six owned files. Source + initial worklog commit `690ef3def8aa`, message `feat(host): add bounded private LAN Ed25519 pairing TCP foundation`, branch `main`. Push receipt request `mcpv2-5d8108359846fc41ccf699f6b1153e06c24444386643c517a9e320cd9a986f98`, `origin/main` advanced `836752b` → `690ef3d`; subsequent Git summary: HEAD `690ef3def8aa`, **ahead=0 behind=0**, all six owned paths clean. All foreign app/control/media/parent changes untouched.
+- This append-only publication evidence is being finalized by a second docs-only closure commit. The closure SHA is reported separately through Agents Global and final task receipt.
 
 ## Boundaries and remaining blocked acceptance
 
