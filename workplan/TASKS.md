@@ -6,13 +6,15 @@ Update statuses only against verified work. The parent owns this file; workers w
 |---|---|---|---|---|---|---|
 | ORCH-001 | P0 | Coordination | Plan, scoped parallel contracts, on-disk worklog, validated/pushed docs | Parent | DONE (0dc3f69) | M0 |
 | ORCH-002 | P0 | Coordination | Spawn verified ChatGPT integrated-browser workers; capture IDs and connector; no duplicate Send | Parent | DONE (A/B/C connected) | ORCH-001 |
-| M1-A | P0 | M1 | Versioned protocol and replay/authorization rules + defensive tests, fixed vectors | Child A deployment-child-f07a00ae2e83139a2c651509bcced8c0 | ACTIVE | M0 |
-| M1-B | P0 | M1 | RN Android scaffold with strict typing, correct permissions UX; Android compilation evidence | Child B deployment-child-2731de29d52bc55a0d490fb10df4b550 | ACTIVE | M0 |
-| M1-C | P0 | M1 | Tauri/Rust Windows session-host scaffold, explicit consent shells; native build evidence | Child C deployment-child-5dd95eac0f20ed757e1075ffb1ae2f5a | ACTIVE | M0 |
-| M1-D | P0 | M1 | Secure identity, mDNS/manual IP/QR, pairing, revocation, firewall LAN scope | Unassigned | BACKLOG | A,B,C |
-| M1-E | P0 | M1 | DataChannel trustworthy dispatch, click/drag/scroll/keyboard + release cleanup | Unassigned | BACKLOG | D |
+| M1-A | P0 | M1 | Versioned protocol and replay/authorization rules + defensive tests, fixed vectors | Recovery child deployment-child-bbc34cdad3c9a4d00d2198cdc94cd93f | SOURCE PUBLISHED 76ba8fbc; 21 protocol tests PASS; physical wire integration NOT ACCEPTED | M0 |
+| M1-B | P0 | M1 | RN Android scaffold with strict typing, correct permissions UX; Android compilation evidence | Recovery child deployment-child-0be47d2258f08bde1769c93c953e1d3e | SOURCE DIRTY / OBSERVE stale lifecycle; dependencies installed by parent; native APK/E2E NOT RUN, preserve ownership until evidence-based recovery | M0 |
+| M1-C | P0 | M1 | Tauri/Rust Windows session-host scaffold, explicit consent shells; native build evidence | QA child deployment-child-7d93f6ee2b706c428f7505c7abbae424 | NATIVE CARGO CHECK + frontend typecheck/build + 3 tests PASS (worker receipts); app-local changes DIRTY, no commit/push/installer; preserve active lifecycle | M0 |
+| M1-D | P0 | M1 | Secure identity, mDNS/manual IP/QR, pairing, revocation, firewall LAN scope | Recovery child deployment-child-1dc365316ae781182e8dba888e1cdd19 | CRYPTO SUBSTRATE PUBLISHED a79b295 + docs b590b65; Rust 27 tests + 1 doc test, fmt/check/clippy PASS; real LAN listener/mDNS/QR/approval integration PENDING | A,B,C |
+| M1-D-WIRE | P0 | M1 | Strict Ed25519 pairing hello/challenge/proof TS↔Rust wire and deterministic fixtures | Child deployment-child-561935b02268766930c7f1c696db2a65 | SOURCE PUBLISHED 6541bee + docs 0bb3f22; strict TS, ESLint and 30 protocol tests PASS; native integration NOT ACCEPTED | M1-A,M1-D |
+| M1-D-LIVE | P0 | M1 | Host private-LAN listener, signed discovery/QR, explicit local approval plumbing; no public exposure | Unassigned | READY for isolated implementation; no physical acceptance | M1-D,M1-D-WIRE |
+| M1-E | P0 | M1 | DataChannel trustworthy dispatch, click/drag/scroll/keyboard + release cleanup | Unassigned | BACKLOG; must bind authenticated channel, consent generation and native session | M1-D-LIVE,M1-B,M1-C |
 | M1-F | P0 | M1 | Physical Android↔Win11 E2E, security/latency and packaging gate | Unassigned | BACKLOG | E |
-| M2-A | P0 | M2 | Consent-bound WGC source selection in user session | Unassigned | BACKLOG | M1-F |
+| M2-A | P0 | M2 | Consent-bound WGC source selection in user session | Recovery child deployment-child-4536a5890b6d1a47e477248ab42a9cd0 | SOURCE PUBLISHED 121429f1; 7 Rust tests PASS; physical capture/host integration NOT ACCEPTED | M1-F |
 | M2-B | P0 | M2 | GPU crop/scale and H.264 over WebRTC to Android | Unassigned | BACKLOG | M2-A |
 | M2-C | P0 | M2 | Cursor-follow independent zoom toggles, DPI/edge clamps, real-device verification | Unassigned | BACKLOG | M2-B |
 | M3-A | P1 | M3 | Input ergonomics, shortcuts, multimedia and settings parity | Unassigned | BACKLOG | M2-C |
