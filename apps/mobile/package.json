@@ -1,0 +1,31 @@
+{
+  "name": "@zoomouse/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "start": "react-native start",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint App.tsx src",
+    "test": "vitest run src/domain src/navigation"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-native": "0.88.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "21.0.0-alpha.1",
+    "@react-native/babel-preset": "0.88.1",
+    "@react-native/community-cli-plugin": "0.88.1",
+    "@react-native/gradle-plugin": "0.88.1",
+    "@react-native/metro-config": "0.88.1",
+    "@react-native/typescript-config": "0.88.1",
+    "@types/react": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  },
+  "engines": { "node": ">=22.13.0" }
+}

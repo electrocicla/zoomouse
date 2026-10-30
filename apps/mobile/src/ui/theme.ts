@@ -1,0 +1,40 @@
+import { StyleSheet } from "react-native";
+
+export const palette = {
+  background: "#09131C",
+  panel: "#14232E",
+  raised: "#1B303D",
+  border: "#294354",
+  primary: "#C5FA71",
+  text: "#F2F7FA",
+  muted: "#A0B6C2",
+  warning: "#F9D98A",
+  disabled: "#72909B",
+} as const;
+
+export const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: palette.background },
+  page: { flex: 1, paddingHorizontal: 22 },
+  scroll: { paddingBottom: 34 },
+  overline: { color: palette.primary, fontSize: 11, fontWeight: "800", letterSpacing: 1.6, marginTop: 22, marginBottom: 6 },
+  title: { color: palette.text, fontSize: 30, fontWeight: "800", letterSpacing: -0.7 },
+  subtitle: { color: palette.muted, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 22 },
+  card: { backgroundColor: palette.panel, borderRadius: 18, borderWidth: 1, borderColor: palette.border, padding: 17, marginBottom: 14 },
+  cardTitle: { color: palette.text, fontSize: 16, fontWeight: "700", marginBottom: 7 },
+  body: { color: palette.muted, fontSize: 14, lineHeight: 21 },
+  strong: { color: palette.text, fontWeight: "700" },
+  badge: { color: palette.warning, fontSize: 11, fontWeight: "800", letterSpacing: 1, marginBottom: 8 },
+  button: { borderRadius: 14, paddingVertical: 14, paddingHorizontal: 18, marginTop: 10, alignItems: "center", borderWidth: 1, borderColor: palette.primary, backgroundColor: palette.primary },
+  buttonLabel: { color: palette.background, fontSize: 14, fontWeight: "800" },
+  secondaryButton: { backgroundColor: palette.raised, borderColor: palette.border },
+  secondaryLabel: { color: palette.text },
+  disabledButton: { backgroundColor: palette.panel, borderColor: palette.border, opacity: 0.65 },
+  input: { backgroundColor: palette.background, borderColor: palette.border, color: palette.text, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 12, fontSize: 16 },
+  nav: { flexDirection: "row", borderTopWidth: 1, borderColor: palette.border, backgroundColor: palette.panel, paddingTop: 10, paddingBottom: 12, justifyContent: "space-evenly" },
+  navItem: { alignItems: "center", padding: 10, minWidth: 86 },
+  navText: { color: palette.muted, fontSize: 12, fontWeight: "700" },
+  navTextActive: { color: palette.primary },
+  topBar: { paddingHorizontal: 22, paddingTop: 20, paddingBottom: 4, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  wordmark: { fontWeight: "900", color: palette.text, fontSize: 23, letterSpacing: -1 },
+  status: { color: palette.warning, fontSize: 11, fontWeight: "800" },
+});
