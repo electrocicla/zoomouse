@@ -1,0 +1,37 @@
+# Zoomouse M1-D-LIVE2 — Host authority composition and fail-closed LAN security
+
+**Owner:** `deployment-child-a19e9fa8d84027ef663a3eafcef9c6fe` / `web-child-a19e9fa8d84027ef663a3eafcef9c6fe`  
+**Connector:** @MK059, authorized workspace rootIndex 13 `Zoomouse`; Agents Global lifecycle `90463bfa-437a-4189-b40f-4b5eca46af80`.  
+**Repository/branch:** `github.com/electrocicla/zoomouse` / `main`. Baseline verified `2763ab58021ae01b011f2ab5e6fde1cd791e048a`; parent subsequently published `25ac4392893a`, M1-E `bd8c870b052e` + receipt `90206eee7f9d`, Android M1-B-NATIVE source `83fafb205dbd` while work proceeded. All are separate ownership; do not treat as this worker's commit.
+
+## Plan and cascade security analysis
+
+1. Read `workplan/{README,PLAN,TASKS,WORKLOG,ACCEPTANCE-M1}.md`, `docs/{ARCHITECTURE,ROADMAP}.md`, `crates/host/src/{lib,boundary,consent,error,input,lan,pairing,pairing_tcp}.rs`, `packages/protocol/PAIRING-WIRE.md`, Windows Tauri shell `apps/windows/src-tauri/src/lib.rs` and live Agents Global claims.
+2. Separate Ed25519 pairing *key possession/enrollment* from encrypted transport authority and local per-session approval. Both missing authenticating authorities are intentionally unconstructible in production: no host activation, transport identities, native input, mDNS/QR grants or network listener via this code.
+3. Compose single-device native session admission, native user-session receipt matching, pairing TTL and consent lease, session/channel fingerprint equality and revoke-before-key release; unit-test positives only with test-local synthetic authority fixtures and security negatives. Reuse existing Rust error/ownership semantics and preserve separate M1-E control crate.
+4. Run scoped Cargo fmt/check/test/clippy, record governed tracked run IDs; publish only enumerated `crates/host/**` and this new worker log through Git FIFO, verify `origin/main`.
+
+## Owned implementation
+
+- `crates/host/src/admission.rs` **new**, intentionally private production module. `HostAdmission<B>` owns `PairingRegistry`, `HostSession<B>`, exactly one pending and active cryptographic-channel binding. Pairing challenge/proof are narrow forwarders (no mutable registry escape). Pairing approval requires an opaque, OS-session-bound `NativePairingApprovalReceipt`; control-session approval requires a distinct opaque `NativeApprovalReceipt` whose device ID, session ID, channel binding ID and Windows interactive user session must match. No production constructors for `VerifiedChannelEvidence` or native approval receipts; only test fixtures create them.
+- `request_session` validates enrolled public key, interactive desktop and cleanup state before creating a pending consent; `decide_session_locally` consumes the pending request, checks exact session/desktop/identity and TTL-bound native decision; `dispatch` rechecks active verified-channel equality, current enrollment, interactive desktop and HostSession consent. Explicit device revoke, channel disconnect, emergency stop and expired/revoked consent invalidate authorization before best-effort `release_all`; failed release retains fail-closed `cleanup_failed`.
+- `BootstrapStatus::DisabledMissingNativeAuthority` is unconditional; zero public/plaintext/multicast listeners are activated.
+- `crates/host/src/boundary.rs` adds narrow `pub(crate)` native begin/decide consent wrappers instead of exposing general mutable consent through public API.
+- `crates/host/src/lib.rs` registers `admission` as private, exports only public inert `BootstrapStatus` and `HostAdmission` facade; privileged operations are unavailable outside the Rust crate and no Tauri/Android/OS dispatch integration is modified.
+- Unit negatives: no implicit input on startup or pairing proof, pending/denied consent, wrong device/session/channel/public key, mismatched native approval receipt, locked Windows desktop, expired consent, connection disconnect, replay, failed native cleanup. Test-only synthetic Ed25519 pairing and input counter are NOT real DTLS/Win32 input evidence.
+
+## Governed validations (Windows workspace `I:\\Zoomouse`)
+
+- Initial tracked `cargo test --manifest-path crates/host/Cargo.toml` run `termrun_a07451c2891a480f80304495d93e01c9` **FAIL exit 101**: one test fixture line was corrupted by an adapter-side secret-redaction substitution in generated source (`[REDACTED]` produced malformed Rust). Corrected only that fixture with an XOR mutation of the public-key bytes; no security gate weakened.
+- Corrected `cargo test --manifest-path crates/host/Cargo.toml` run `termrun_e355e5ab08384e1a8156b3e8a4d9f4f0`: **PASS exit 0**, 41 unit tests + 1 compile-fail doctest.
+- `cargo fmt --manifest-path crates/host/Cargo.toml` run `termrun_63ff894ab5254a44bd8bfc6c3779b819`: **PASS exit 0**.
+- Final fail-fast chain `cmd.exe /d /s /c "cargo fmt --manifest-path crates/host/Cargo.toml -- --check && cargo check --manifest-path crates/host/Cargo.toml && cargo test --manifest-path crates/host/Cargo.toml && cargo clippy --manifest-path crates/host/Cargo.toml --all-targets -- -D warnings && echo M1D_LIVE2_ALL_PASS"` run `termrun_26f322ef84a647e385ef1273d053cffa`: **PASS exit 0**, authoritative `M1D_LIVE2_ALL_PASS` marker. All 4 scoped commands ran serially; 41/41 unit and 1/1 doctest PASS; clippy warning-free under `-D warnings`.
+- An earlier run attempt was denied *before execution* by the parallel Android worker's active `workplan/workers/M1-B-NATIVE.md` claim; likewise earlier Android/M1-E workspace QA attempts were denied by my temporary host file claims. Coordinated in Agents Global and explicitly released 3 host source claims during peers' governed FIFO turns. No bypass, no concurrent source edits, no foreign file staging.
+
+## Security limitations / acceptance
+
+**SOURCE-ONLY / FAIL CLOSED**: local pairing receipt and session receipt have no actual Windows native trusted-UI producer; no encrypted WebRTC DTLS/DataChannel adapter attests live channel key binding; no OS-observed desktop integration; no firewall/interface-route attestation; the private TCP pairing adapter remains intentionally uncalled in production; no actual mDNS/QR activation, Win32 SendInput, Windows.Graphics.Capture, media, APK/installer, real Android cross-device packets or physical latency/reconnect/secure-desktop validation. Production Tauri still uses `HostSession<DisabledInput>`, returns `input_enabled=false`, `discovery_enabled=false`; a UI preview/QR has no grant authority. Physical acceptance **A01–A17 NOT RUN**. Actual activation requires independent reviewed secure transport + OS-local approval, firewall binding and physical Win11/Android security QA. Do not claim M1-E, M1-F or M2 completion from isolated Rust unit tests.
+
+## Publication receipt
+
+Pending exact scoped Git FIFO source+worker-log commit and push; append authenticated commit SHA, remote 0/0 and parent log via Agents Global. Other dirty paths (root configs, Android, M2 docs, control) preserved as separate ownership.

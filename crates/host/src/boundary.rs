@@ -1,6 +1,6 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::consent::{ConsentController, ConsentPhase};
+use crate::consent::{ConsentController, ConsentPhase, ConsentRequest, LocalDecision};
 use crate::error::HostError;
 use crate::input::{InputAction, InputBackend};
 
@@ -110,6 +110,28 @@ impl<B: InputBackend> HostSession<B> {
     #[must_use]
     pub fn consent(&self) -> &ConsentController {
         &self.consent
+    }
+
+    /// Crate-internal native authority seam; never expose as IPC or network.
+    pub(crate) fn begin_native_consent_request(
+        &mut self,
+        peer: AuthenticatedPeer,
+        desktop: &DesktopContext,
+        display_name: String,
+    ) -> Result<ConsentRequest, HostError> {
+        self.consent
+            .begin_authenticated_request(peer, desktop, display_name)
+    }
+
+    /// Called only after a verified OS-local consent callback.
+    pub(crate) fn decide_native_consent(
+        &mut self,
+        choice: LocalDecision,
+        desktop: &DesktopContext,
+        now: Instant,
+        lease: Duration,
+    ) -> Result<(), HostError> {
+        self.consent.decide_locally(choice, desktop, now, lease)
     }
 
     #[must_use]
