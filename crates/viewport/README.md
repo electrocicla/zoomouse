@@ -1,0 +1,21 @@
+# Zoomouse M2-C — pure Rust viewport geometry
+
+**Source-only geometry foundation. NOT integrated, not video-capable.** This crate has no dependencies, native APIs, window privileges, screenshot access, GPU crop, H.264, WebRTC, Android input injection or capture/stream authorization.
+
+## Trusted host integration seam
+
+1. Trusted interactive Windows user-session host acquires **current native source selection/consent**, physical GetCursorPos coordinates, source physical desktop half-open bounds, real frame size, verified monitor topology revision, and trustworthy logical-to-physical DPI anchors. `SourceGeometry::new` requires nonzero source/revision, finite physical/per-monitor scales 0.5–8.0, equal desktop/frame aspect; rotation other than independently verified unrotated mapping fails closed. No automatic source retarget, no DPI detection, no double DPI transform. A `Topology` admits at most 16 disjoint screen rects with one shared revision. A WGC *window* cannot be modeled as a monitor rect unless the host proves the full content transform and occlusion.
+2. Configure `Settings::new(streaming,zoom,follow,magnification,smoothing)` with independently approved UI data; zoom 1–4x, smoothing finite 0–1. Each monotonic frame supplies `dt_ms`, host-verified cursor and exact source ID. `Viewport::step` returns `None` when streaming disabled; `follow=false` freezes last center, and an outside-source physical cursor never follows into another display. Reset on reselect, revoke, resize, DPI/orientation/topology change, sleep or authority loss; source revisions also reset center. Smoothing is exponential time-based, not count-of-frames; finite max dt is 60 seconds.
+3. `Projection.crop` has even origin and dimensions and exact output cross-product aspect for NV12, matches existing M2-B `CropRect::new`/`CropPlan::new` **if** the frame, output dimensions, source generation and host authority all match. Crop is quantized to the largest even exact-aspect grid at/below requested zoom; actual magnification may be greater (never promise exact arbitrary floating zoom). Zoom OFF requires a full even frame with matching output aspect; otherwise fails `UnsupportedFullFrame`. Parent must design letterboxing or a different output profile; do NOT silently crop hidden content. Only M2-B native owner should convert to its crate types. No edits are permitted to crates/media.
+4. For Android coordinate mapping, pin each displayed frame to `Projection.source.id()/revision()`, crop/output and authenticated session/grant generation. `output_to_physical` is a pure inverse only; the host must independently authorize and validate session/device/source, crop freshness, display content bounds and native injection before acting. `physical_to_output` returns None for foreign screens/outside crop. Floating geometry is continuous; native integer rounding/clamping and actual decoder letterbox/presentation mapping require E2E verification.
+5. The existing M2-B implementation is intentionally `BackendUnavailable`: no GPU frame processing, NV12 encoder, DTLS/SRTP, Android video decoder or real capture service is implemented. M2 release remains blocked on M1 physical consent/LAN input A01–A17, host/video pipeline, real physical mixed-DPI/rotation validation, source resize/lock/revoke tests, encoder/HDR characterization, latency/CPU/battery/GPU measurements and packaging.
+
+## Boundary/security
+
+This crate grants **no** capture, video, transport or input authority. Source identities are only informational, not proofs. Reject NaN/Inf, degenerate geometry, overflow, unsupported rotation/content transforms, mismatched aspect, mixed revisions, overlaps, duplicate monitor IDs and outside-source movement. All returned crop rectangles are half-open and even. Never pass caller-supplied source IDs, remote cursor positions or display dimensions to WGC/native injection without host-side authoritative checks.
+
+## Reproducible isolated QA
+
+`cargo fmt --manifest-path crates/viewport/Cargo.toml -- --check`, `cargo test --manifest-path crates/viewport/Cargo.toml`, `cargo check --manifest-path crates/viewport/Cargo.toml`, `cargo clippy --manifest-path crates/viewport/Cargo.toml --all-targets -- -D warnings`.
+
+Physical M2 and Android↔Windows E2E: **NOT RUN / NOT ACCEPTED**.
