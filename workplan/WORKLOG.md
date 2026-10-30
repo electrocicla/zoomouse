@@ -14,6 +14,11 @@ Append concise checkpoints for decisions, verified operations and reconciliation
 
 ### Pending verification
 
-- Plan commit/push receipt.
-- Child integrated-browser deployment receipt and Agents Global connectedAt.
+- Plan commit/push receipt: **verified** commit `0dc3f6915e37`, origin/main synchronized (pnpm check passed with 18 tests).
+- Child integrated-browser deployment receipts and authenticated Agents Global connectedAt: **verified all three**:
+  - M1-A protocol: deployment `743ff9fa-81a9-4337-985c-5ec6f07adfb9`; child `deployment-child-f07a00ae2e83139a2c651509bcced8c0`; connected `2026-10-30T05:40:14.288Z`.
+  - M1-B Android: deployment `8f4073b7-a484-419b-b98d-c86b6e3d19fe`; child `deployment-child-2731de29d52bc55a0d490fb10df4b550`; connected `2026-10-30T05:43:09.165Z`.
+  - M1-C Windows: deployment `53528544-f776-4fba-b828-4a57a5103c31`; child `deployment-child-5dd95eac0f20ed757e1075ffb1ae2f5a`; connected `2026-10-30T05:46:10.969Z`.
+- Child work is **ACTIVE**, not DONE; each owns a separate path and must provide tests, worklog, commit and push. The parent will reconcile their work before M1 integration acceptance.
+- An Agents Global critical notice identified a temporary workspace claim conflict with parent-owned `workplan/TASKS.md` during M1-B work; parent released claim `c1afdcd4-aa8b-4aca-ab11-7fd2d3c89e42`, acknowledged the notice and replied. No edits by M1-B to the parent task board are authorized.
 - Android APK, Windows host build and physical LAN E2E remain pending, not falsely counted complete.

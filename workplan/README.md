@@ -2,7 +2,7 @@
 
 Owner: Zoomouse M1 parent orchestrator. Canonical repo: `github.com/electrocicla/zoomouse`; branch: `main`; baseline `efac24a0997714a98df1d1bd48d0ecdba69a0d6f`.
 
-This directory is the durable coordination record: [PLAN](PLAN.md), [TASKS](TASKS.md), [WORKLOG](WORKLOG.md), per-worker append-only summaries in `workers/<task-id>.md`. Product references: `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/QA-2026-10-30.md`.
+This directory is the durable coordination record: [PLAN](PLAN.md), [TASKS](TASKS.md), [WORKLOG](WORKLOG.md), [M1 physical acceptance matrix](ACCEPTANCE-M1.md), per-worker append-only summaries in `workers/<task-id>.md`. Product references: `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/QA-2026-10-30.md`.
 
 ## Definition of done and operating discipline
 
