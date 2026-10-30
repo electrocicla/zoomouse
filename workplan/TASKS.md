@@ -15,7 +15,7 @@ Update statuses only against verified work. The parent owns this file; workers w
 | M1-E | P0 | M1 | DataChannel trustworthy dispatch, click/drag/scroll/keyboard + release cleanup | Child deployment-child-84d4978c2f7d086b095215765c87737e | ACTIVE — authenticated connectedAt 2026-10-30T19:19:16.143Z; isolated crates/control/** source foundation; code/tests/push PENDING, no live DataChannel accepted | M1-D-LIVE,M1-B,M1-C |
 | M1-F | P0 | M1 | Physical Android↔Win11 E2E, security/latency and packaging gate | Unassigned | BACKLOG | E |
 | M2-A | P0 | M2 | Consent-bound WGC source selection in user session | Recovery child deployment-child-4536a5890b6d1a47e477248ab42a9cd0 | SOURCE PUBLISHED 121429f1; 7 Rust tests PASS; physical capture/host integration NOT ACCEPTED | M1-F |
-| M2-B | P0 | M2 | GPU crop/scale and H.264 over WebRTC to Android | Unassigned | BACKLOG | M2-A |
+| M2-B | P0 | M2 | GPU crop/scale and H.264 over WebRTC to Android | Child deployment-child-c2e1fd2c6611abc865ec216c3cc954e1 | ACTIVE — authenticated connectedAt 2026-10-30T19:22:09.449Z; isolated crates/media/** source foundation; no GPU/codec/WebRTC E2E accepted | M2-A |
 | M2-C | P0 | M2 | Cursor-follow independent zoom toggles, DPI/edge clamps, real-device verification | Unassigned | BACKLOG | M2-B |
 | M3-A | P1 | M3 | Input ergonomics, shortcuts, multimedia and settings parity | Unassigned | BACKLOG | M2-C |
 | M3-B | P1 | M3 | Accessibility, history, themes/i18n, mobile UX visual QA | Unassigned | BACKLOG | M3-A |
