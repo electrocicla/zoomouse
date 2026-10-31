@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./session-policy": "./src/session-policy.ts",
-    "./pairing-wire": "./src/pairing-wire.ts"
+    "./pairing-wire": "./src/pairing-wire.ts",
+    "./channel-proof-fixture": "./src/channel-proof-fixture.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
