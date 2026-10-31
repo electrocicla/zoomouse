@@ -121,3 +121,16 @@ Append concise checkpoints for decisions, verified operations and reconciliation
 ### R7 root source verification
 
 - Host-tracked background validation `validation_aa3863acd5654caa` / `run_1260b092f47a47d1`: `pnpm typecheck` **PASS** exit 0, completed 2026-10-30T23:55:35.162Z. Live-workspace source snapshot not pinned; checks root protocol/preview TypeScript, **not** Android Gradle, Tauri installer, Rust channel integration or physical A01–A17.
+
+### R7 closure reconciliation — 2026-10-31 00:04 UTC
+
+- New authenticated R7-HOST-CHANNEL child source `d57900acb909` (`feat(host): verify one-shot DTLS channel proof without granting native input`) and own worker-log closure `d6db4ecc1346` (`docs(host): record R7 channel-proof QA and source publication`) both published; parent verified `origin/main` ahead 0, behind 0, HEAD `d6db4ecc1346`. Worker Cargo receipts: initial test incorrect signature-key fixture assumption FIXED, final 54 unit tests +1 doctest PASS, Cargo fmt/check/clippy PASS. `ObservedEncryptedChannel` proof is crate-private and is NOT verified as real native transport provenance or OS authorization; bootstrap disabled.
+- Parent-owned reconciliation commit `be00c5d2d132` (`docs(zoomouse): reconcile R6 publications and R7 trusted-channel wave`) pushed and verified ahead0 behind0, files exclusively `workplan/{PLAN,TASKS,WORKLOG}.md`; foreign dirty root config/lockfile and M2-B/M2-C/R6-WIN worker logs untouched.
+- Parent background root TypeScript `pnpm typecheck` PASS exit0, validation `validation_aa3863acd5654caa` / `run_1260b092f47a47d1`. Root `pnpm test:run` PASS exit0, validation `validation_ff3f8fbc915a4e7d` / `run_60b4b9c9b79d4566`, **30 protocol and 7 preview tests (37 total)**. These are live-workspace checks, not pinned-source or native acceptance.
+- **Explicitly not accepted:** Win11 OS-local consent and enrolled-peer-bound authenticated live DTLS/DataChannel, integrated native input release, Android APK/SDK37/Gradle wrapper, Windows installer, physical A01–A17, production WGC/D3D11/H.264/WebRTC/M2 benchmarks, M3 and M4. Next: coordinate an authorized native Windows consent/DTLS adapter and Android equivalent, then physical QA; preserve fail-closed defaults.
+
+### R7 final root-source validation receipts
+
+- `pnpm lint` **PASS exit 0** — host validation `validation_c0c8a021c81b43d1`, run `run_b0158b3bf4284a24`, completed 2026-10-31T00:06:16.405Z.
+- `pnpm build` **PASS exit 0** — host validation `validation_39b31b43fda44095`, run `run_5359b53df18142ec`, completed 2026-10-31T00:06:50.434Z. This produces the preview Vite build, **not** an Android APK or Windows installer.
+- Combined with R7 root typecheck and `pnpm test:run` checks above, the four root source gates passed; all validations used live workspace rather than an immutable snapshot. Platform packaging, physical device QA and trusted transport remain blocked, not concealed by preview checks.
