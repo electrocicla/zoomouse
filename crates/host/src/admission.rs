@@ -7,6 +7,9 @@
 //! callback provenance. Remote JSON/QR/mDNS must never mint either authority.
 use std::time::{Duration, Instant};
 
+/// Local callback lifetime is measured by the host monotonic clock.
+const MAX_PENDING_NATIVE_CONSENT: Duration = Duration::from_secs(60);
+
 use crate::boundary::{AuthenticatedPeer, DesktopContext, HostSession};
 use crate::consent::{ConsentPhase, ConsentRequest, LocalDecision};
 use crate::error::HostError;
@@ -43,11 +46,23 @@ pub(crate) struct NativePairingApprovalReceipt {
 /// A preview button or QR scan must not manufacture a receipt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeApprovalReceipt {
+    /// One-shot host-only correlation, never sent to renderer or network.
+    request_nonce: [u8; 16],
     device_id: String,
     session_id: String,
     channel_binding_id: String,
     windows_user_session_id: String,
     decision: LocalDecision,
+}
+
+/// Host-owned pending local callback state. The nonce and clock must never
+/// derive from remote packets, QR descriptors or Tauri renderer IPC.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingNativeConsent {
+    channel: VerifiedChannelEvidence,
+    request_nonce: [u8; 16],
+    opened_at: Instant,
+    windows_user_session_id: String,
 }
 
 /// A decoded input frame from the SAME authenticated encrypted channel.
@@ -75,7 +90,7 @@ pub enum BootstrapStatus {
 pub struct HostAdmission<B: InputBackend> {
     pairing: PairingRegistry,
     host: HostSession<B>,
-    pending_channel: Option<VerifiedChannelEvidence>,
+    pending_channel: Option<PendingNativeConsent>,
     active_channel: Option<VerifiedChannelEvidence>,
     ingress: Option<IngressGate>,
 }
@@ -167,6 +182,13 @@ impl<B: InputBackend> HostAdmission<B> {
         if self.pending_channel.is_some() || self.active_channel.is_some() {
             return Err(HostError::InvalidApproval);
         }
+        let mut request_nonce = [0u8; 16];
+        getrandom::getrandom(&mut request_nonce).map_err(|_| HostError::InvalidApproval)?;
+        if request_nonce.iter().all(|byte| *byte == 0)
+            || now.checked_add(MAX_PENDING_NATIVE_CONSENT).is_none()
+        {
+            return Err(HostError::InvalidApproval);
+        }
         let peer = AuthenticatedPeer::from_verified_channel(
             channel.device_id.clone(),
             channel.session_id.clone(),
@@ -175,7 +197,12 @@ impl<B: InputBackend> HostAdmission<B> {
         let request = self
             .host
             .begin_native_consent_request(peer, desktop, display_name)?;
-        self.pending_channel = Some(channel);
+        self.pending_channel = Some(PendingNativeConsent {
+            channel,
+            request_nonce,
+            opened_at: now,
+            windows_user_session_id: desktop.user_session_id().to_owned(),
+        });
         Ok(request)
     }
 
@@ -192,18 +219,23 @@ impl<B: InputBackend> HostAdmission<B> {
             .pending_channel
             .take()
             .ok_or(HostError::InvalidApproval)?;
-        if receipt.device_id != pending.device_id
-            || receipt.session_id != pending.session_id
-            || receipt.channel_binding_id != pending.channel_binding_id
+        if receipt.request_nonce != pending.request_nonce
+            || now < pending.opened_at
+            || now.duration_since(pending.opened_at) >= MAX_PENDING_NATIVE_CONSENT
+            || !desktop.can_receive_input()
+            || pending.windows_user_session_id != desktop.user_session_id()
+            || receipt.device_id != pending.channel.device_id
+            || receipt.session_id != pending.channel.session_id
+            || receipt.channel_binding_id != pending.channel.channel_binding_id
             || receipt.windows_user_session_id != desktop.user_session_id()
             || !self.pairing.has_local_enrollment(
-                &pending.device_id,
-                &pending.public_key,
+                &pending.channel.device_id,
+                &pending.channel.public_key,
                 desktop,
                 now,
             )
         {
-            self.pairing.revoke(&pending.device_id);
+            self.pairing.revoke(&pending.channel.device_id);
             self.host.revoke()?;
             return Err(HostError::InvalidApproval);
         }
@@ -211,17 +243,17 @@ impl<B: InputBackend> HostAdmission<B> {
             .host
             .decide_native_consent(receipt.decision, desktop, now, lease)
         {
-            self.pairing.revoke(&pending.device_id);
+            self.pairing.revoke(&pending.channel.device_id);
             self.host.revoke()?;
             return Err(error);
         }
         if receipt.decision == LocalDecision::Deny {
-            self.pairing.revoke(&pending.device_id);
+            self.pairing.revoke(&pending.channel.device_id);
             self.host.revoke()?;
             return Ok(());
         }
         self.ingress = Some(IngressGate::default());
-        self.active_channel = Some(pending);
+        self.active_channel = Some(pending.channel);
         Ok(())
     }
 
@@ -319,8 +351,11 @@ impl<B: InputBackend> HostAdmission<B> {
         let owns_session = self
             .active_channel
             .as_ref()
-            .or(self.pending_channel.as_ref())
-            .is_some_and(|current| current.device_id == device_id);
+            .is_some_and(|current| current.device_id == device_id)
+            || self
+                .pending_channel
+                .as_ref()
+                .is_some_and(|pending| pending.channel.device_id == device_id);
         if owns_session {
             self.active_channel = None;
             self.pending_channel = None;
@@ -332,7 +367,11 @@ impl<B: InputBackend> HostAdmission<B> {
 
     /// Must be called on disconnect, desktop lock, emergency stop and shutdown.
     pub fn emergency_stop(&mut self) -> Result<(), HostError> {
-        if let Some(channel) = self.active_channel.take().or(self.pending_channel.take()) {
+        if let Some(channel) = self
+            .active_channel
+            .take()
+            .or_else(|| self.pending_channel.take().map(|pending| pending.channel))
+        {
             self.pairing.revoke(&channel.device_id);
         }
         self.pending_channel = None;
@@ -349,8 +388,11 @@ impl<B: InputBackend> HostAdmission<B> {
         let matching = self
             .active_channel
             .as_ref()
-            .or(self.pending_channel.as_ref())
-            .is_some_and(|current| current == channel);
+            .is_some_and(|current| current == channel)
+            || self
+                .pending_channel
+                .as_ref()
+                .is_some_and(|pending| &pending.channel == channel);
         if matching {
             self.emergency_stop()?;
         }
@@ -447,10 +489,16 @@ mod tests {
     }
 
     fn receipt(
+        host: &HostAdmission<CountingInput>,
         channel: &VerifiedChannelEvidence,
         decision: LocalDecision,
     ) -> NativeApprovalReceipt {
         NativeApprovalReceipt {
+            request_nonce: host
+                .pending_channel
+                .as_ref()
+                .expect("native fixture pending")
+                .request_nonce,
             device_id: channel.device_id.clone(),
             session_id: channel.session_id.clone(),
             channel_binding_id: channel.channel_binding_id.clone(),
@@ -464,7 +512,7 @@ mod tests {
         host.request_session(channel.clone(), &desktop(false), "Phone".into(), now)
             .expect("pending");
         host.decide_session_locally(
-            &receipt(&channel, LocalDecision::Approve),
+            &receipt(host, &channel, LocalDecision::Approve),
             &desktop(false),
             now,
             Duration::from_secs(90),
@@ -517,7 +565,7 @@ mod tests {
             Err(HostError::Unauthorized)
         );
         host.decide_session_locally(
-            &receipt(&channel, LocalDecision::Deny),
+            &receipt(&host, &channel, LocalDecision::Deny),
             &desktop(false),
             now,
             Duration::from_secs(90),
@@ -547,7 +595,7 @@ mod tests {
             Err(HostError::WrongSession)
         );
         other = channel.clone();
-        other.public_key = other.public_key.map(|byte| byte ^ 0xff);
+        other.public_key[0] ^= 0xff;
         assert_eq!(
             host.dispatch(&other, &desktop(false), &InputAction::Text("x".into()), now),
             Err(HostError::WrongSession)
@@ -641,7 +689,7 @@ mod tests {
         let channel = prepare(&mut host, now);
         host.request_session(channel.clone(), &desktop(false), "Phone".into(), now)
             .expect("pending");
-        let mut forged = receipt(&channel, LocalDecision::Approve);
+        let mut forged = receipt(&host, &channel, LocalDecision::Approve);
         forged.channel_binding_id = "another-verified-channel".into();
         assert_eq!(
             host.decide_session_locally(&forged, &desktop(false), now, Duration::from_secs(90)),
@@ -651,6 +699,63 @@ mod tests {
         assert!(host
             .request_session(channel, &desktop(false), "Phone".into(), now)
             .is_err());
+    }
+
+    #[test]
+    fn stale_native_callback_cannot_approve_and_consumes_pending() {
+        let now = Instant::now();
+        let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+        let channel = prepare(&mut host, now);
+        host.request_session(channel.clone(), &desktop(false), "Phone".into(), now)
+            .expect("pending");
+        let callback = receipt(&host, &channel, LocalDecision::Approve);
+        assert_eq!(
+            host.decide_session_locally(
+                &callback,
+                &desktop(false),
+                now + MAX_PENDING_NATIVE_CONSENT,
+                Duration::from_secs(90)
+            ),
+            Err(HostError::InvalidApproval)
+        );
+        assert_eq!(host.phase(), ConsentPhase::Revoked);
+        assert!(host.pending_channel.is_none());
+        assert!(host.active_channel.is_none());
+        assert_eq!(
+            host.decide_session_locally(&callback, &desktop(false), now, Duration::from_secs(90)),
+            Err(HostError::InvalidApproval)
+        );
+    }
+
+    #[test]
+    fn wrong_nonce_and_rewound_clock_revoke_without_input() {
+        for rewind in [false, true] {
+            let now = Instant::now();
+            let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+            let channel = prepare(&mut host, now);
+            host.request_session(channel.clone(), &desktop(false), "Phone".into(), now)
+                .expect("pending");
+            let mut callback = receipt(&host, &channel, LocalDecision::Approve);
+            if !rewind {
+                callback.request_nonce[0] ^= 0x80;
+            }
+            let decision_time = if rewind {
+                now - Duration::from_nanos(1)
+            } else {
+                now
+            };
+            assert_eq!(
+                host.decide_session_locally(
+                    &callback,
+                    &desktop(false),
+                    decision_time,
+                    Duration::from_secs(90)
+                ),
+                Err(HostError::InvalidApproval)
+            );
+            assert_eq!(host.host.test_backend().count, 0);
+            assert_eq!(host.phase(), ConsentPhase::Revoked);
+        }
     }
 
     #[test]
