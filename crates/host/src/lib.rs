@@ -7,6 +7,9 @@
 mod admission;
 
 pub mod boundary;
+// Cryptographic DTLS/SCTP binding verifier only; no native adapter or grant.
+#[allow(dead_code)]
+mod channel_binding;
 pub mod consent;
 pub mod error;
 pub mod input;
