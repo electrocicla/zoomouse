@@ -7,7 +7,8 @@
     "start": "react-native start",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint App.tsx src",
-    "test": "vitest run src/domain src/navigation"
+    "test": "node --test android-readiness.test.mjs && vitest run src/domain src/navigation",
+    "android:preflight": "node android-readiness.mjs"
   },
   "dependencies": {
     "react": "19.3.0",
