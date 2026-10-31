@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn another_windows_user_session_is_never_authorized() {
+    fn another_windows_user_session_revokes_held_input_and_cannot_restore_consent() {
         let now = Instant::now();
         let mut host = HostSession::new(SpyBackend::default());
         grant(&mut host, now);
@@ -482,7 +482,19 @@ mod tests {
                 &InputAction::Text("blocked".into()),
                 now
             ),
-            Err(HostError::WrongSession)
+            Err(HostError::DesktopUnavailable)
+        );
+        assert_eq!(host.backend.actions, 0);
+        assert_eq!(host.backend.releases, 1);
+        assert_eq!(host.phase(), ConsentPhase::Revoked);
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Text("replay after returning to original user".into()),
+                now
+            ),
+            Err(HostError::Revoked)
         );
         assert_eq!(host.backend.actions, 0);
     }

@@ -237,6 +237,58 @@ mod tests {
     }
 
     #[test]
+    fn valid_proof_just_before_deadline_succeeds_but_exact_deadline_is_expired() {
+        let now = Instant::now();
+        let phone = SigningKey::from_bytes(&[9; 32]);
+        let observation = observed(&phone);
+        let (mut before, nonce) =
+            ChannelProofChallenge::start(&observation, now).expect("valid challenge");
+        let signature = phone
+            .sign(&transcript_digest(&observation, &nonce))
+            .to_bytes();
+        assert_eq!(
+            before.finish(&signature, now + PROOF_TTL - Duration::from_nanos(1)),
+            Ok(())
+        );
+
+        let (mut at_deadline, deadline_nonce) =
+            ChannelProofChallenge::start(&observation, now).expect("second challenge");
+        let deadline_signature = phone
+            .sign(&transcript_digest(&observation, &deadline_nonce))
+            .to_bytes();
+        assert_eq!(
+            at_deadline.finish(&deadline_signature, now + PROOF_TTL),
+            Err(ChannelProofError::Expired)
+        );
+        assert_eq!(
+            at_deadline.finish(&deadline_signature, now),
+            Err(ChannelProofError::Reused)
+        );
+    }
+
+    #[test]
+    fn malformed_signature_consumes_challenge_even_if_correct_signature_follows() {
+        let now = Instant::now();
+        let phone = SigningKey::from_bytes(&[9; 32]);
+        let observation = observed(&phone);
+        let (mut challenge, nonce) =
+            ChannelProofChallenge::start(&observation, now).expect("valid challenge");
+        let valid = phone
+            .sign(&transcript_digest(&observation, &nonce))
+            .to_bytes();
+        let mut malformed = valid;
+        malformed[0] ^= 0x80;
+        assert_eq!(
+            challenge.finish(&malformed, now),
+            Err(ChannelProofError::InvalidSignature)
+        );
+        assert_eq!(
+            challenge.finish(&valid, now),
+            Err(ChannelProofError::Reused)
+        );
+    }
+
+    #[test]
     fn malformed_or_missing_backend_observation_is_never_accepted() {
         let now = Instant::now();
         let phone = SigningKey::from_bytes(&[9; 32]);

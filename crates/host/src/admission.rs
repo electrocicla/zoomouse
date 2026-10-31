@@ -578,6 +578,70 @@ mod tests {
     }
 
     #[test]
+    fn second_pending_session_cannot_replace_nonce_or_channel() {
+        let now = Instant::now();
+        let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+        let channel = prepare(&mut host, now);
+        host.request_session(channel.clone(), &desktop(false), "First phone".into(), now)
+            .expect("first pending request");
+        let original = host
+            .pending_channel
+            .clone()
+            .expect("pending callback state");
+        let mut different_channel = channel.clone();
+        different_channel.session_id = "verified-session-0002".into();
+        assert_eq!(
+            host.request_session(
+                different_channel,
+                &desktop(false),
+                "Second phone".into(),
+                now
+            ),
+            Err(HostError::InvalidApproval)
+        );
+        assert_eq!(host.pending_channel, Some(original));
+        assert_eq!(host.phase(), ConsentPhase::Pending);
+        host.decide_session_locally(
+            &receipt(&host, &channel, LocalDecision::Approve),
+            &desktop(false),
+            now,
+            Duration::from_secs(90),
+        )
+        .expect("original callback still valid");
+        assert_eq!(host.active_channel, Some(channel));
+        assert_eq!(host.phase(), ConsentPhase::Approved);
+    }
+
+    #[test]
+    fn desktop_user_switch_during_pending_consent_consumes_callback_and_enrollment() {
+        let now = Instant::now();
+        let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+        let channel = prepare(&mut host, now);
+        host.request_session(channel.clone(), &desktop(false), "Phone".into(), now)
+            .expect("pending");
+        let callback = receipt(&host, &channel, LocalDecision::Approve);
+        let another_user =
+            DesktopContext::from_local_os("windows-user-session-02".into(), true, false)
+                .expect("other local OS user");
+        assert_eq!(
+            host.decide_session_locally(&callback, &another_user, now, Duration::from_secs(90)),
+            Err(HostError::InvalidApproval)
+        );
+        assert!(host.pending_channel.is_none());
+        assert!(host.active_channel.is_none());
+        assert_eq!(host.phase(), ConsentPhase::Revoked);
+        assert_eq!(host.host.test_backend().count, 0);
+        assert_eq!(host.host.test_backend().releases, 1);
+        assert_eq!(
+            host.decide_session_locally(&callback, &desktop(false), now, Duration::from_secs(90)),
+            Err(HostError::InvalidApproval)
+        );
+        assert!(host
+            .request_session(channel, &desktop(false), "Retry".into(), now)
+            .is_err());
+    }
+
+    #[test]
     fn session_key_binding_rejects_second_phone_and_new_channel() {
         let now = Instant::now();
         let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");

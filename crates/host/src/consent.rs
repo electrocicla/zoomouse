@@ -172,7 +172,12 @@ impl ConsentController {
         if now >= grant.expires_at {
             return Err(HostError::Expired);
         }
-        if &grant.peer != peer || grant.windows_session_id != desktop.user_session_id() {
+        // An OS user-session switch is a desktop-loss event, not merely a
+        // foreign peer. The caller must revoke and release any held input.
+        if grant.windows_session_id != desktop.user_session_id() {
+            return Err(HostError::DesktopUnavailable);
+        }
+        if &grant.peer != peer {
             return Err(HostError::WrongSession);
         }
         Ok(())
