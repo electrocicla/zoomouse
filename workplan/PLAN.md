@@ -56,6 +56,13 @@ M0 UI/protocol baseline (complete)
 
 Avoid concurrent edits to root `package.json`, `pnpm-lock.yaml`, `tsconfig.base.json`, CI or shared contracts. Only parent integrates shared root config/lockfile after child proposals. Workers may commit path-scoped changes; Git FIFO serializes publication, not code design.
 
+## R8 priority and ownership (2026-10-30 21:20 CLST)
+
+- **Observed source checkpoint:** `main` HEAD `f698f3420ee2`, tracking `origin/main` 0 ahead/0 behind. Six pre-existing dirty/untracked files remain deliberately untouched: `.gitignore`, `package.json`, `pnpm-lock.yaml`, `workplan/workers/M2-B.md`, `workplan/workers/R6-WIN.md`, and `workplan/workers/M2-C.md`. No current Zoomouse file claims; R6-WIN/ANDROID logical lifecycles are stale, not proven terminal. Do not overwrite or reassign their source paths merely from stale presence.
+- **R8-PROTOCOL (P0, independent):** `packages/protocol/**` plus NEW `workplan/workers/R8-PROTOCOL.md` only. Read Rust `crates/host/src/channel_binding.rs` and Android `lan-attempt.ts` without mutation. Produce grounded cross-language transcript/defensive vectors where possible, never JS/native authorization or invented DTLS provenance. Integrated ChatGPT @MK059 deployment `2811fce0-d6ab-48a0-80d9-98893168520b`, child `deployment-child-c852e955eda7c24a2e70035c74eae1ed`, submitted 2026-10-31 00:21:12Z; authenticated child connection **not yet verified** at this checkpoint.
+- **R8-WIN / R8-HOST / R8-ANDROID next (P0):** do not overlap R6-WIN/ANDROID stale recoverable ownership; first reconcile their completion/claims. The trust-critical path is a real Windows interactive-user-session provenance callback and host-owned consent, then native DTLS/WebRTC producer bound to enrolled phone and Android counterpart, host input dispatcher release guarantees, native build/install artifacts, physical A01–A17. Keep `DisabledMissingNativeAuthority` and all remote input/video OFF until all gates are met. Assign each future worker exclusive `apps/windows/**`, `crates/host/**`, or `apps/mobile/**` only after verified release/coordination.
+- **M2/M3/M4:** source-only media/viewport foundations are not acceptance; preserve M2-B/M2-C uncommitted logs for a dedicated nonoverlapping recovery. M2 real WGC→D3D11→H.264→WebRTC and physical metrics follow M1, then UX parity and explicitly opted-in Internet security. Parent exclusively owns shared `workplan/{PLAN,TASKS,WORKLOG,README}.md` and root configuration; no blind lockfile staging.
+
 ## Release gates / exit criteria
 
 **M0 — DONE (prior commit):** simulated preview + protocol, 18 local tests/lint/typecheck/build. No native app, LAN control or video.
