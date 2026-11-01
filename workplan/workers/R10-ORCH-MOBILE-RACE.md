@@ -18,3 +18,9 @@
 - R10-WIN child deployment **refused before Send**: parent Agents Global identity ambiguous (implicit host-generated task, no explicit host-supplied `agentInstanceId`). No child created. Do not fabricate an instance identity or replay Send.
 - Four inherited dirty paths `.gitignore`, `package.json`, `pnpm-lock.yaml`, `workplan/workers/R6-WIN.md` preserved. R10-WIN/HOST/ANDROID native integrations remain READY/BLOCKED as applicable; this race fix is independent source hardening.
 - Commit/push evidence is recorded in the parent worklog after authoritative Git publication, not assumed here.
+
+## Publication receipt
+
+Scoped source+worker-note commit `9f2a28da0d53` (`fix(android): close cancelled late native LAN opens before retry`) pushed to `origin/main`, post-push Git summary ahead=0/behind=0. Three owned files only; four inherited dirty paths preserved. This follow-up note is documentation-only and will be published in the parent's reconciliation commit.
+
+- Additional cross-workspace root gate after source publication: `corepack pnpm check` exit0, run `termrun_a4b4a510ae0d49f2bf1d495c0dbd6352`, 35 protocol + 7 preview tests and Vite preview build; excludes native Android/Windows and physical E2E.

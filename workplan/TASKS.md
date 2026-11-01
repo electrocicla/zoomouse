@@ -52,3 +52,12 @@ Update statuses only against verified work. The parent owns this file; workers w
 | R10-M2-M4 | P1/P2 | Separate future owners | Actual capture/encode/decode/zoom metrics, UX parity, opted-in WAN security | BACKLOG (M1 prerequisite) |
 
 Source-only completion must not advance physical M1/M2/M3/M4 acceptance. See [R10-EXECUTION-PLAN.md](R10-EXECUTION-PLAN.md) for file/contract cascade and explicit gates.
+
+### R10 current-run source closure (2026-11-01)
+
+| ID | Scope | Verified outcome | Status |
+|---|---|---|---|
+| R10-ORCH-MOBILE-RACE | `apps/mobile/src/domain/lan-attempt.{ts,test.ts}`, own worker log | Native-open cancellation race closed; immediate+late close serialized, cleanup failure latches deny; 4 Node readiness + 98 Vitest, TS and lint exit0; commit `9f2a28da0d53` pushed origin/main 0/0 | SOURCE DONE; native E2E NOT ACCEPTED |
+| R10-DELEGATION | R10-WIN-SESSION integrated ChatGPT @MK059 | Deployment refused **before Send** by ambiguous implicit parent Agents Global identity; no child created, no ownership transfer. Needs a genuinely host-supplied explicit parent `agentInstanceId` in a future lifecycle | BLOCKED (identity) |
+
+R10-WIN-SESSION/R10-ANDROID-CHANNEL/R10-HOST-CHANNEL remain unassigned READY source tasks; M1/M2/M3/M4 remain unaccepted.
