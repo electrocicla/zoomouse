@@ -39,3 +39,16 @@ Update statuses only against verified work. The parent owns this file; workers w
 ### Mandatory worker completion template
 
 `Task / repo / branch / touched paths / base SHA / changes / checks (commands + result) / risks / unfinished gates / commit SHA / push receipt / Agents Global log phase / parent notified`. No unverifiable DONE.
+
+## R10 native integration backlog (2026-11-01; not acceptance)
+
+| ID | Priority | Exclusive source ownership | Acceptance / dependency | Initial status |
+|---|---|---|---|---|
+| R10-WIN-SESSION | P0 | `apps/windows/**`, NEW `workplan/workers/R10-WIN-SESSION.md` | OS-observed Win11 interactive desktop and unforgeable local callback foundation, tests; no renderer Approve; R9-B/C | READY (not delegated) |
+| R10-ANDROID-CHANNEL | P0 | `apps/mobile/**`, NEW `workplan/workers/R10-ANDROID-CHANNEL.md` | Native DTLS/identity counterpart or explicitly fail-closed tested contract; R9-A and R8-PROTOCOL | READY (not delegated) |
+| R10-HOST-CHANNEL | P0 | `crates/host/**`, NEW `workplan/workers/R10-HOST-CHANNEL.md` | Provenance-bound host admission, negative tests, no production constructors without real native proof; R9-C | READY (not delegated) |
+| R10-ROOT-LOCK | P1 | Orchestrator, inherited root dirty paths only after ownership resolution | Reproducible frozen lockfile and manifest graph, no foreign staging | BLOCKED (provenance/ownership) |
+| R10-ARTIFACTS-E2E | P1 | Owner-approved native builds and device QA | Actual EXE/APK + A01–A17 receipts, secure LAN; after R10 trust integration | BLOCKED (native authority/toolchain/physical devices) |
+| R10-M2-M4 | P1/P2 | Separate future owners | Actual capture/encode/decode/zoom metrics, UX parity, opted-in WAN security | BACKLOG (M1 prerequisite) |
+
+Source-only completion must not advance physical M1/M2/M3/M4 acceptance. See [R10-EXECUTION-PLAN.md](R10-EXECUTION-PLAN.md) for file/contract cascade and explicit gates.
