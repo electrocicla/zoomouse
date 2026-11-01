@@ -70,6 +70,23 @@ export class LanAttemptCoordinator {
   private active: ActiveAttempt | null = null;
   private nextId = 0;
   private cleanupFailed = false;
+  private pendingOpenId: number | null = null;
+  private disconnectClose: Promise<void> | null = null;
+
+  /** A cancelled native open may settle after the first close. Close again
+   * before allowing a new attempt, so late native resources cannot survive. */
+  private async finishCancelledOpen(attemptId: number): Promise<void> {
+    try {
+      await this.disconnectClose;
+      await this.native.close(attemptId);
+      if (!this.cleanupFailed && this.stateValue.phase === "closing") {
+        this.stateValue = { phase: "idle" };
+      }
+    } catch {
+      this.cleanupFailed = true;
+      this.stateValue = { phase: "blocked", reason: "cleanup-failed" };
+    }
+  }
 
   constructor(private readonly native: NativeSecureLanPort = createUnavailableNativeLanPort()) {}
 
@@ -87,15 +104,23 @@ export class LanAttemptCoordinator {
 
     const attempt: ActiveAttempt = { id: ++this.nextId, abort: new AbortController() };
     this.active = attempt;
+    this.pendingOpenId = attempt.id;
     this.stateValue = { phase: "opening", attemptId: attempt.id, candidate };
 
     try {
       await this.native.open(attempt.id, candidate, attempt.abort.signal);
+      this.pendingOpenId = null;
       if (this.active === attempt) {
         this.stateValue = { phase: "native-link-unverified", attemptId: attempt.id, candidate };
+      } else {
+        await this.finishCancelledOpen(attempt.id);
       }
     } catch (error: unknown) {
-      if (this.active !== attempt) return this.stateValue;
+      this.pendingOpenId = null;
+      if (this.active !== attempt) {
+        await this.finishCancelledOpen(attempt.id);
+        return this.stateValue;
+      }
       attempt.abort.abort();
       this.active = null;
       this.stateValue = { phase: "closing" };
@@ -125,13 +150,22 @@ export class LanAttemptCoordinator {
     }
     this.active = null;
     attempt.abort.abort();
+    const wasOpening = this.pendingOpenId === attempt.id;
     this.stateValue = { phase: "closing" };
+    // Serialize the immediate close with the late-open close. A native port
+    // may ignore AbortSignal and finish opening after this close completes.
+    const close = Promise.resolve().then(() => this.native.close(attempt.id));
+    this.disconnectClose = close;
     try {
-      await this.native.close(attempt.id);
-      if (this.stateValue.phase === "closing") this.stateValue = { phase: "idle" };
+      await close;
+      if (!wasOpening && this.stateValue.phase === "closing") {
+        this.stateValue = { phase: "idle" };
+      }
     } catch {
       this.cleanupFailed = true;
       this.stateValue = { phase: "blocked", reason: "cleanup-failed" };
+    } finally {
+      if (this.disconnectClose === close) this.disconnectClose = null;
     }
     return this.stateValue;
   }

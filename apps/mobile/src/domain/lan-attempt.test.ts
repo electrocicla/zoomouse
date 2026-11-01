@@ -97,11 +97,59 @@ describe("Android native LAN attempt boundary", () => {
     const closing = coordinator.disconnect();
     expect(coordinator.state.phase).toBe("closing");
     expect(gate.signal?.aborted).toBe(true);
-    expect(await closing).toEqual({ phase: "idle" });
+    // Abort is advisory: the first close cannot prove a still-pending native
+    // open will not create resources afterward. Keep the attempt closing.
+    expect(await closing).toEqual({ phase: "closing" });
+    expect((await coordinator.open(qrIntent)).phase).toBe("closing");
     gate.resume?.();
     expect((await opening).phase).toBe("idle");
     expect(coordinator.state.phase).toBe("idle");
-    expect(closed).toEqual([1]);
+    expect(closed).toEqual([1, 1]);
+  });
+
+  it("latches failure when a cancelled late open cannot be closed again", async () => {
+    const gate: { resume?: () => void } = {};
+    const pending = new Promise<void>(resolve => { gate.resume = resolve; });
+    let closeCount = 0;
+    const coordinator = new LanAttemptCoordinator(nativePort(
+      async () => { await pending; },
+      async () => {
+        closeCount++;
+        if (closeCount === 2) throw new Error("late resource cleanup failed");
+      },
+    ));
+    const opening = coordinator.open(intent);
+    expect(await coordinator.disconnect()).toEqual({ phase: "closing" });
+    gate.resume?.();
+    expect(await opening).toEqual({ phase: "blocked", reason: "cleanup-failed" });
+    expect(closeCount).toBe(2);
+    expect(await coordinator.open(qrIntent)).toEqual({ phase: "blocked", reason: "cleanup-failed" });
+    expect(canSendInputFromLanAttempt(coordinator.state)).toBe(false);
+  });
+
+  it("serializes late-open cleanup behind a still-running first close", async () => {
+    const gate: { open?: () => void; close?: () => void } = {};
+    const pendingOpen = new Promise<void>(resolve => { gate.open = resolve; });
+    const pendingClose = new Promise<void>(resolve => { gate.close = resolve; });
+    const closeCalls: number[] = [];
+    const coordinator = new LanAttemptCoordinator(nativePort(
+      async () => { await pendingOpen; },
+      async id => {
+        closeCalls.push(id);
+        if (closeCalls.length === 1) await pendingClose;
+      },
+    ));
+    const opening = coordinator.open(intent);
+    const disconnecting = coordinator.disconnect();
+    await Promise.resolve();
+    expect(closeCalls).toEqual([1]);
+    gate.open?.();
+    await Promise.resolve();
+    expect(closeCalls).toEqual([1]); // no overlapping native close
+    gate.close?.();
+    expect((await disconnecting).phase).toBe("closing");
+    expect((await opening).phase).toBe("idle");
+    expect(closeCalls).toEqual([1, 1]);
   });
 
   it("keeps input denied through every diagnostics phase, including forged observations", async () => {
