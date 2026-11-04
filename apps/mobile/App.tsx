@@ -1,11 +1,13 @@
-import { useState } from "react";
-import { SafeAreaView, ScrollView, StatusBar, Text, Pressable, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { AppState, NativeModules, SafeAreaView, ScrollView, StatusBar, Text, Pressable, View } from "react-native";
 import { ApprovalScreen } from "./src/screens/ApprovalScreen";
 import { ControlsScreen } from "./src/screens/ControlsScreen";
 import { DevicesScreen } from "./src/screens/DevicesScreen";
 import { ManualIpScreen, QrScreen } from "./src/screens/OnboardingScreens";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { navigationTitle } from "./src/navigation/routes";
+import { createAndroidNativeLanPort } from "./src/domain/android-native-lan";
+import { LanAttemptCoordinator } from "./src/domain/lan-attempt";
 import type { Route } from "./src/navigation/routes";
 import { palette, styles } from "./src/ui/theme";
 
@@ -17,6 +19,23 @@ const tabs: ReadonlyArray<Readonly<{ route: Route; label: string }>> = [
 
 export default function App() {
   const [route, setRoute] = useState<Route>("devices");
+  // One coordinator across screen visits: a late native open cannot survive
+  // navigation by silently acquiring a fresh coordinator.
+  const coordinatorRef = useRef<LanAttemptCoordinator | null>(null);
+  if (coordinatorRef.current === null) {
+    const module: unknown = NativeModules.ZoomouseSecureLan;
+    coordinatorRef.current = new LanAttemptCoordinator(createAndroidNativeLanPort(module));
+  }
+  const coordinator = coordinatorRef.current;
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", state => {
+      if (state !== "active") void coordinator.disconnect();
+    });
+    return () => {
+      subscription.remove();
+      void coordinator.disconnect();
+    };
+  }, [coordinator]);
   const goDevices = () => setRoute("devices");
 
   return (
@@ -34,7 +53,7 @@ export default function App() {
         accessibilityLabel={navigationTitle(route)}
       >
         {route === "devices" ? <DevicesScreen onIp={() => setRoute("manual-ip")} onQr={() => setRoute("qr")} onApproval={() => setRoute("approval")} /> : null}
-        {route === "manual-ip" ? <ManualIpScreen onBack={goDevices} /> : null}
+        {route === "manual-ip" ? <ManualIpScreen coordinator={coordinator} onBack={goDevices} /> : null}
         {route === "qr" ? <QrScreen onBack={goDevices} /> : null}
         {route === "approval" ? <ApprovalScreen onBack={goDevices} /> : null}
         {route === "controls" ? <ControlsScreen onApproval={() => setRoute("approval")} onSettings={() => setRoute("settings")} /> : null}

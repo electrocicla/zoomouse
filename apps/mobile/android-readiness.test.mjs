@@ -29,7 +29,10 @@ function fixture() {
   put("jdk/bin/java", "fixture");
   put("jdk/bin/javac", "fixture");
   put("sdk/platforms/android-37/android.jar", "fixture");
-  put("sdk/build-tools/37.0.0/aapt2", "fixture");
+  for (const tool of ["aapt2", "d8", "zipalign", "apksigner"]) {
+    put(`sdk/build-tools/37.0.0/${tool}`, "fixture");
+  }
+  put("sdk/build-tools/37.0.0/source.properties", "Pkg.Revision = 37.0.0\n");
   put("sdk/ndk/28.2.13676358/source.properties", "Pkg.Revision = 28.2.13676358\n");
   put("node_modules/@react-native/gradle-plugin/package.json", "{}");
   return {
@@ -78,6 +81,15 @@ test("untrusted distribution, incorrect checksum and mismatched SDK roots fail c
     assert.equal(byId(result, id), false, `${id} must not be accepted`);
   }
   assert.equal(result.readyForBuildAttempt, false);
+});
+
+test("partial or misversioned SDK Build-Tools 37 cannot pass preflight", () => {
+  const { mobileDir, env, nodeVersion, put } = fixture();
+  put("sdk/build-tools/37.0.0/d8", "");
+  assert.equal(byId(inspectAndroidReadiness({ mobileDir, env, nodeVersion }), "sdk-build-tools-37"), false);
+  put("sdk/build-tools/37.0.0/d8", "fixture");
+  put("sdk/build-tools/37.0.0/source.properties", "Pkg.Revision = 36.0.0\n");
+  assert.equal(byId(inspectAndroidReadiness({ mobileDir, env, nodeVersion }), "sdk-build-tools-37"), false);
 });
 
 test("unsupported Node and JDK versions are rejected", () => {

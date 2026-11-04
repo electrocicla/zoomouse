@@ -72,9 +72,14 @@ export function inspectAndroidReadiness({
   check("sdk-root", Boolean(sdk), "Set ANDROID_HOME to the Android SDK; ANDROID_SDK_ROOT must agree if defined.");
   check("sdk-platform-37", Boolean(sdk && nonemptyFile(path.join(sdk, "platforms", "android-37", "android.jar"))),
     "Install Android SDK Platform 37.");
-  check("sdk-build-tools-37", Boolean(sdk && ["aapt2", "aapt2.exe"].some((name) =>
-    nonemptyFile(path.join(sdk, "build-tools", "37.0.0", name)))),
-  "Install Android SDK Build-Tools 37.0.0.");
+  const buildTools = sdk ? path.join(sdk, "build-tools", "37.0.0") : null;
+  const buildToolsProperties = buildTools ? textFile(path.join(buildTools, "source.properties")) : null;
+  const hasBuildTool = (name) => Boolean(buildTools && [name, name + ".exe", name + ".bat"].some((file) =>
+    nonemptyFile(path.join(buildTools, file))));
+  check("sdk-build-tools-37", Boolean(buildToolsProperties &&
+    /^Pkg\.Revision\s*=\s*37\.0\.0\s*$/m.test(buildToolsProperties) &&
+    ["aapt2", "d8", "zipalign", "apksigner"].every(hasBuildTool)),
+    "Install complete Android SDK Build-Tools 37.0.0 (aapt2, d8, zipalign, apksigner and source.properties).");
   const ndk = sdk ? textFile(path.join(sdk, "ndk", "28.2.13676358", "source.properties")) : null;
   check("ndk-28", Boolean(ndk && /^Pkg\.Revision\s*=\s*28\.2\.13676358\s*$/m.test(ndk)),
     "Install Android NDK 28.2.13676358.");
