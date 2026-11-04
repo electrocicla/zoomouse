@@ -9,6 +9,7 @@ const denied = Object.freeze({
   discoveryEnabled: false,
   captureEnabled: false,
   localUserSessionOnly: false,
+  desktopObservation: "unavailable",
   approvalGate: NATIVE_APPROVAL_GATE,
   lastReleaseOutcome: "notAttempted"
 });
@@ -26,10 +27,19 @@ test("malformed IPC payloads remain unverified", () => {
     null, undefined, [], "Approved", 1, {}, { ...denied, phase: "SomethingElse" },
     { ...denied, inputEnabled: "true" }, { ...denied, discoveryEnabled: null },
     { ...denied, localUserSessionOnly: undefined }, { ...denied, captureEnabled: 1 },
-    { ...denied, approvalGate: undefined }, { ...denied, lastReleaseOutcome: "unknown" }
+    { ...denied, approvalGate: undefined }, { ...denied, lastReleaseOutcome: "unknown" },
+    { ...denied, desktopObservation: undefined }, { ...denied, desktopObservation: "approved" }
   ]) {
     assert.equal(parseHostStatus(value), null);
   }
+});
+
+test("observed desktop cannot mint consent, channel authority or input access", () => {
+  const observed = { ...denied, desktopObservation: "interactiveDefault" };
+  assert.deepEqual(parseHostStatus(observed), observed);
+  assert.equal(parseHostStatus({ ...observed, phase: "Approved" }), null);
+  assert.equal(parseHostStatus({ ...observed, inputEnabled: true }), null);
+  assert.equal(parseHostStatus({ ...observed, localUserSessionOnly: true }), null);
 });
 
 test("renderer rejects fabricated consent/channel/desktop/input claims", () => {

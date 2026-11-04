@@ -24,4 +24,4 @@ serde = { version = "1", features = ["derive"] }
 zoomouse-host = { path = "../../../crates/host" }
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"

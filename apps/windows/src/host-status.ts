@@ -4,6 +4,7 @@
  */
 export type ConsentPhase = "Denied" | "Pending" | "Approved" | "Revoked";
 export type ReleaseOutcome = "notAttempted" | "confirmed" | "failed";
+export type DesktopObservation = "interactiveDefault" | "unavailable";
 
 /** Only valid for the current fail-closed native shell, not future approved hosts. */
 export const NATIVE_APPROVAL_GATE = "missingVerifiedChannelAndNativeApproval" as const;
@@ -15,12 +16,17 @@ export interface HostStatus {
   readonly discoveryEnabled: boolean;
   readonly captureEnabled: boolean;
   readonly localUserSessionOnly: boolean;
+  readonly desktopObservation: DesktopObservation;
   readonly approvalGate: typeof NATIVE_APPROVAL_GATE;
   readonly lastReleaseOutcome: ReleaseOutcome;
 }
 
 function isConsentPhase(value: unknown): value is ConsentPhase {
   return value === "Denied" || value === "Pending" || value === "Approved" || value === "Revoked";
+}
+
+function isDesktopObservation(value: unknown): value is DesktopObservation {
+  return value === "interactiveDefault" || value === "unavailable";
 }
 
 function isReleaseOutcome(value: unknown): value is ReleaseOutcome {
@@ -40,14 +46,16 @@ export function parseHostStatus(value: unknown): HostStatus | null {
     typeof fields.discoveryEnabled !== "boolean" ||
     typeof fields.captureEnabled !== "boolean" ||
     typeof fields.localUserSessionOnly !== "boolean" ||
+    !isDesktopObservation(fields.desktopObservation) ||
     fields.approvalGate !== NATIVE_APPROVAL_GATE ||
     !isReleaseOutcome(fields.lastReleaseOutcome)
   ) {
     return null;
   }
 
-  // No OS-observed desktop, native local decision or DTLS channel exists.
-  // Reject even syntactically valid "Approved" payloads in this app revision.
+  // The OS-observed desktop signal is diagnostic only. No native local
+  // approval callback or DTLS channel exists in this app revision; reject
+  // even syntactically valid "Approved" or input-enabled payloads.
   if (
     (fields.phase !== "Denied" && fields.phase !== "Revoked") ||
     fields.inputEnabled ||
@@ -67,6 +75,7 @@ export function parseHostStatus(value: unknown): HostStatus | null {
     discoveryEnabled: fields.discoveryEnabled,
     captureEnabled: fields.captureEnabled,
     localUserSessionOnly: fields.localUserSessionOnly,
+    desktopObservation: fields.desktopObservation,
     approvalGate: fields.approvalGate,
     lastReleaseOutcome: fields.lastReleaseOutcome
   };

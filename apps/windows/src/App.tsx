@@ -70,14 +70,16 @@ export function App() {
         </div>
         <p className="muted">
           This installed source revision cannot grant remote control or screen access.
-          The Windows host has neither authenticated DTLS channel evidence nor an
-          OS-observed user-session approval callback. No renderer approval command exists.
+          The Windows host has neither authenticated DTLS channel evidence nor a
+          native user-session approval callback. An OS-observed desktop is only
+          a prerequisite, never approval. No renderer approval command exists.
         </p>
         <dl>
           <div><dt>Remote input</dt><dd>{status ? (status.inputEnabled ? "Enabled" : "Disabled") : "Unverified"}</dd></div>
           <div><dt>LAN discovery</dt><dd>{status ? (status.discoveryEnabled ? "Enabled" : "Not configured") : "Unverified"}</dd></div>
           <div><dt>Screen streaming</dt><dd>{status ? (status.captureEnabled ? "Enabled" : "Disabled") : "Unverified"}</dd></div>
-          <div><dt>Session scope</dt><dd>{status?.localUserSessionOnly ? "Interactive user only" : "Unverified"}</dd></div>
+          <div><dt>Windows input desktop</dt><dd>{!status ? "Unverified" : status.desktopObservation === "interactiveDefault" ? "Console / default observed (not approval)" : "Unavailable, locked, secure or unverified"}</dd></div>
+          <div><dt>Session scope</dt><dd>{status?.localUserSessionOnly ? "Interactive user only" : "Not authorized"}</dd></div>
           <div><dt>Local approval</dt><dd>{status ? "Disabled — native authority missing" : "Unverified"}</dd></div>
           <div><dt>Release outcome</dt><dd>{
             !status ? "Unverified" :

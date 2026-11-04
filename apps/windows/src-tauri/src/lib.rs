@@ -1,5 +1,10 @@
 //! User-session desktop shell. No listener, service, elevation or capture.
+mod desktop_observer;
+
 use std::sync::Mutex;
+use std::time::Duration;
+
+use desktop_observer::{observe, DesktopObservation};
 
 use serde::Serialize;
 use tauri::image::Image;
@@ -46,7 +51,17 @@ impl<B: InputBackend> LocalHostState<B> {
         result
     }
 
-    fn status(&self) -> HostStatus {
+    // Loss of the local input desktop or console session revokes and releases.
+    // Do not overwrite a latched cleanup failure on repeat negative samples.
+    fn observe_desktop(&mut self, desktop: DesktopObservation) {
+        if desktop == DesktopObservation::Unavailable
+            && self.session.phase() != ConsentPhase::Revoked
+        {
+            let _ = self.stop();
+        }
+    }
+
+    fn status(&self, desktop: DesktopObservation) -> HostStatus {
         HostStatus {
             phase: phase_label(self.session.phase()),
             input_enabled: false,
@@ -55,6 +70,7 @@ impl<B: InputBackend> LocalHostState<B> {
             discovery_enabled: false,
             capture_enabled: false,
             local_user_session_only: false,
+            desktop_observation: desktop,
             approval_gate: APPROVAL_GATE,
             last_release_outcome: self.last_release,
         }
@@ -72,6 +88,7 @@ struct HostStatus {
     discovery_enabled: bool,
     capture_enabled: bool,
     local_user_session_only: bool,
+    desktop_observation: DesktopObservation,
     approval_gate: &'static str,
     last_release_outcome: ReleaseOutcome,
 }
@@ -87,10 +104,13 @@ fn phase_label(phase: ConsentPhase) -> &'static str {
 
 #[tauri::command]
 fn host_status(host: State<'_, LocalHost>) -> Result<HostStatus, String> {
-    let current = host
+    // Native Win32 reads are independent of renderer/network claims.
+    let desktop = observe().unwrap_or(DesktopObservation::Unavailable);
+    let mut current = host
         .lock()
         .map_err(|_| "host lock unavailable".to_owned())?;
-    Ok(current.status())
+    current.observe_desktop(desktop);
+    Ok(current.status(desktop))
 }
 
 /// Explicitly exposed UI command: deny/release, never grant.
@@ -176,6 +196,20 @@ pub fn run() -> tauri::Result<()> {
                     }
                 })
                 .build(app)?;
+
+            // The UI may be hidden to tray: native desktop-loss monitoring
+            // cannot depend on an IPC status request or renderer focus.
+            let observer_app = app.handle().clone();
+            std::thread::Builder::new()
+                .name("zoomouse-desktop-guard".into())
+                .spawn(move || loop {
+                    std::thread::sleep(Duration::from_millis(500));
+                    let desktop = observe().unwrap_or(DesktopObservation::Unavailable);
+                    let state = observer_app.state::<LocalHost>();
+                    if let Ok(mut host) = state.lock() {
+                        host.observe_desktop(desktop);
+                    };
+                })?;
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -201,7 +235,7 @@ mod tests {
     #[test]
     fn local_shell_never_advertises_approval_or_a_verified_user_session() {
         let mut host = LocalHostState::new(DisabledInput);
-        let status = host.status();
+        let status = host.status(DesktopObservation::Unavailable);
         assert_eq!(status.phase, "Denied");
         assert_eq!(status.approval_gate, APPROVAL_GATE);
         assert!(!status.input_enabled);
@@ -210,18 +244,49 @@ mod tests {
         assert!(!status.capture_enabled);
         assert_eq!(status.last_release_outcome, ReleaseOutcome::NotAttempted);
         host.stop().expect("disabled backend safely releases");
-        assert_eq!(host.status().phase, "Revoked");
         assert_eq!(
-            host.status().last_release_outcome,
+            host.status(DesktopObservation::Unavailable).phase,
+            "Revoked"
+        );
+        assert_eq!(
+            host.status(DesktopObservation::Unavailable)
+                .last_release_outcome,
             ReleaseOutcome::Confirmed
         );
+    }
+
+    #[test]
+    fn observed_interactive_desktop_cannot_grant_access() {
+        let host = LocalHostState::new(DisabledInput);
+        let status = host.status(DesktopObservation::InteractiveDefault);
+        assert_eq!(
+            status.desktop_observation,
+            DesktopObservation::InteractiveDefault
+        );
+        assert_eq!(status.phase, "Denied");
+        assert!(!status.local_user_session_only);
+        assert!(!status.input_enabled);
+        assert_eq!(status.approval_gate, APPROVAL_GATE);
+    }
+
+    #[test]
+    fn desktop_loss_revokes_without_erasing_cleanup_failure() {
+        let mut host = LocalHostState::new(FailingRelease);
+        host.observe_desktop(DesktopObservation::InteractiveDefault);
+        assert_eq!(host.session.phase(), ConsentPhase::Denied);
+        host.observe_desktop(DesktopObservation::Unavailable);
+        assert_eq!(host.session.phase(), ConsentPhase::Revoked);
+        assert_eq!(host.last_release, ReleaseOutcome::Failed);
+        host.observe_desktop(DesktopObservation::Unavailable);
+        assert_eq!(host.last_release, ReleaseOutcome::Failed);
+        assert!(host.status(DesktopObservation::Unavailable).cleanup_failed);
     }
 
     #[test]
     fn native_release_failure_latches_diagnostics_and_never_restores_access() {
         let mut host = LocalHostState::new(FailingRelease);
         assert!(host.stop().is_err());
-        let status = host.status();
+        let status = host.status(DesktopObservation::Unavailable);
         assert_eq!(status.phase, "Revoked");
         assert_eq!(status.last_release_outcome, ReleaseOutcome::Failed);
         assert!(status.cleanup_failed);

@@ -2,7 +2,7 @@
 
 `apps/windows` contains an independent Tauri 2 + React/TypeScript desktop project with a system-tray icon generated in memory, local session status and a one-way emergency-stop/revoke action.
 
-The native app owns a `Mutex<HostSession<DisabledInput>>`. Its Tauri commands are deliberately limited to `host_status` and `emergency_stop`. There is **no** approve, remote network, shell, filesystem or process-execution command, no elevation, Session 0 service, Win32 input injection or screen capture. The UI explicitly labels LAN pairing, remote input and capture as **not implemented**. The emergency-stop action denies further input and invokes backend cleanup. The native shell currently has no OS-observed `DesktopContext`; its user-session-verification flag intentionally stays false, and the renderer labels the session scope **Unverified** until this trusted host integration exists. No interactive desktop state or consent is fabricated. Native-status IPC is checked at runtime; malformed, stale or unavailable state is displayed as **Unverified**, not as an invented safe/approved state. Tray Revoke exposes the settings window when release cleanup fails, while tray Quit refuses silent exit on cleanup failure. Closing the settings window hides it to tray; Quit is an explicit tray-only action.
+The native app owns a `Mutex<HostSession<DisabledInput>>`. Its Tauri commands are deliberately limited to `host_status` and `emergency_stop`. There is **no** approve, remote network, shell, filesystem or process-execution command, no elevation, Session 0 service, Win32 input injection or screen capture. The UI explicitly labels LAN pairing, remote input and capture as **not implemented**. The emergency-stop action denies further input and invokes backend cleanup. The native shell has no host admission-level `DesktopContext` or OS-local approval callback. R11 adds a **read-only Win32 process-session/physical-console/input-desktop observation** in the Tauri shell; this observation is neither a `DesktopContext` constructor nor consent and does not enable remote input. The renderer distinguishes the OS observation from the still-disabled session authorization. No interactive approval or consent is fabricated. Native-status IPC is checked at runtime; malformed, stale or unavailable state is displayed as **Unverified**, not as an invented safe/approved state. Tray Revoke exposes the settings window when release cleanup fails, while tray Quit refuses silent exit on cleanup failure. Closing the settings window hides it to tray; Quit is an explicit tray-only action.
 
 ## Development prerequisites / commands
 
@@ -117,3 +117,37 @@ approved private-LAN/firewall integration and A01–A17 physical tests.
 those receipts/evidence, and its bootstrap is disabled. Do not add an IPC
 command or renderer state that fabricates them. No installer is created by
 this source change; user-owned packaging is separate.
+
+## R11 Windows native desktop signal (source only; 2026-11-04)
+
+`src-tauri/src/desktop_observer.rs` probes the **running process** through Win32
+`ProcessIdToSessionId`, the physical console via `WTSGetActiveConsoleSessionId`,
+and the currently active input desktop with `OpenInputDesktop` +
+`GetUserObjectInformationW(UOI_NAME)`. Only a nonzero process session
+matching the physically attached console **and** the exact `Default`
+input-desktop name produce `desktopObservation=interactiveDefault`.
+Session 0, RDP/non-console sessions, console switch/detach, UAC secure desktop,
+Winlogon/locked desktop, OS API errors and non-Windows builds return
+`unavailable` (fail-closed). The desktop handle is always closed.
+A 500ms **native Rust background watcher** runs even with the settings webview
+hidden and revokes/releases the host on lost/unknown desktop observations;
+repeat negative samples do not erase a latched cleanup failure. This is
+best-effort sampling, not a guaranteed synchronous Windows session notification.
+
+Readiness is only a local diagnostic, not a security grant. Native status and
+renderer still fix `localUserSessionOnly=false`,
+`approvalGate=missingVerifiedChannelAndNativeApproval`, `DisabledInput`, and
+no TCP listener, screen capture, approve IPC or remote input. This source does
+**not** create the host crate's private `DesktopContext` from Win32, a native
+approval callback or a production DTLS channel; cross-crate evidence binding,
+locked-session notification ordering, hardware tests and A01-A17 remain open.
+The audited Win32 FFI functions are confined to one `#[allow(unsafe_code)]`
+module, with package-wide `unsafe_code=deny` elsewhere. No Windows
+privilege/service/elevation or session switching is performed.
+
+Owner-only unsigned EXE build remains `corepack pnpm --filter @zoomouse/windows exec tauri build --no-bundle`
+from the repository root, after prerequisites/lockfile ownership are resolved.
+If successful on the default Windows MSVC target, the **expected** path is
+`apps/windows/src-tauri/target/release/zoomouse-desktop.exe`. No raw EXE,
+installer, launch, signing, remote-control acceptance or physical A01-A17
+is claimed by source checks.
