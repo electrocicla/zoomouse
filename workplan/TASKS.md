@@ -61,3 +61,16 @@ Source-only completion must not advance physical M1/M2/M3/M4 acceptance. See [R1
 | R10-DELEGATION | R10-WIN-SESSION integrated ChatGPT @MK059 | Deployment refused **before Send** by ambiguous implicit parent Agents Global identity; no child created, no ownership transfer. Needs a genuinely host-supplied explicit parent `agentInstanceId` in a future lifecycle | BLOCKED (identity) |
 
 R10-WIN-SESSION/R10-ANDROID-CHANNEL/R10-HOST-CHANNEL remain unassigned READY source tasks; M1/M2/M3/M4 remain unaccepted.
+
+## R11 native implementation wave (2026-11-04; see [R11-EXECUTION-PLAN.md](R11-EXECUTION-PLAN.md))
+
+| ID | Priority | Exclusive file ownership | Observable outcome | Status |
+|---|---|---|---|---|
+| R11-WIN-SESSION | P0 | `apps/windows/**` + `workers/R11-WIN-NATIVE-SESSION.md` | OS-observed Windows interactive desktop/session signal, native guards and tests; no renderer-minted consent | DELEGATED, authenticated child `deployment-child-ca8e9ce0995e1030e9b6c0404b75e96f` connected 2026-11-04T17:49:24Z; result pending |
+| R11-ANDROID-CHANNEL | P0 | `apps/mobile/**` + `workers/R11-ANDROID-NATIVE-CHANNEL.md` | Native-ready Android secure-channel contracts, fail-closed lifecycle, tooling readiness with exact receipts | DEPLOYMENT IN PROGRESS; no completion inferred |
+| R11-HOST-CHANNEL | P0 | `crates/host/**` + `workers/R11-HOST-CHANNEL.md` | Authenticated/native host proof integration and adversarial QA without forged authority | QUEUED FOR INDEPENDENT DEPLOYMENT |
+| R11-ORCH | P0 | `workplan/{R11-EXECUTION-PLAN,PLAN,TASKS,WORKLOG,README}.md` | Plan, Agents Global identities, claims, scoped commits/push receipts and native acceptance gap reconciliation | ACTIVE |
+| R11-ARTIFACTS-E2E | P0 | Owner/run-only native artifacts and physical A01–A17 | Actual Windows EXE + Android APK builds/install, encrypted LAN input, real local approval, revocation | BLOCKED: real native authority, Android SDK37/Gradle wrapper and device acceptance unverified |
+| R11-M2-M4 | P1/P2 | Subsequent assigned disjoint scopes | WGC/video WebRTC/zoom real device and performance, M3 UX parity, M4 internet | BACKLOG, M1 security prerequisite |
+
+**Acceptance invariant:** R11 source tests, successful compilation, package creation and physical security acceptance are distinct. Do not advance M1–M4 on source-only evidence.
