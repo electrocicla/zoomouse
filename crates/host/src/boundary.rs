@@ -188,6 +188,15 @@ impl<B: InputBackend> HostSession<B> {
     }
 }
 
+// A normal host/session teardown must not leave held native buttons or keys
+// pressed if the caller forgot an explicit disconnect. This is best-effort:
+// process termination and native release errors still require OS-side cleanup.
+impl<B: InputBackend> Drop for HostSession<B> {
+    fn drop(&mut self) {
+        let _ = self.revoke();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +262,72 @@ mod tests {
                 Duration::from_secs(90),
             )
             .expect("approved locally");
+    }
+
+    #[test]
+    fn rewound_grant_clock_revokes_and_releases_before_any_input() {
+        let now = Instant::now();
+        let mut host = HostSession::new(SpyBackend::default());
+        grant(&mut host, now);
+        assert_eq!(
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Text("denied".into()),
+                now - Duration::from_nanos(1),
+            ),
+            Err(HostError::Expired)
+        );
+        assert_eq!(host.backend.actions, 0);
+        assert_eq!(host.backend.releases, 1);
+        assert_eq!(host.phase(), ConsentPhase::Revoked);
+    }
+
+    #[test]
+    fn dropping_approved_host_attempts_held_input_release() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        struct ObservedRelease(Rc<Cell<usize>>);
+        impl InputBackend for ObservedRelease {
+            fn dispatch(&mut self, _action: &InputAction) -> Result<(), HostError> {
+                Ok(())
+            }
+            fn release_all(&mut self) -> Result<(), HostError> {
+                self.0.set(self.0.get() + 1);
+                Ok(())
+            }
+        }
+
+        let releases = Rc::new(Cell::new(0));
+        {
+            let now = Instant::now();
+            let mut host = HostSession::new(ObservedRelease(Rc::clone(&releases)));
+            host.begin_native_consent_request(
+                peer("transport-binding-0001"),
+                &desktop(true, false),
+                "Phone".into(),
+            )
+            .expect("pending fixture");
+            host.decide_native_consent(
+                LocalDecision::Approve,
+                &desktop(true, false),
+                now,
+                Duration::from_secs(30),
+            )
+            .expect("approved fixture");
+            host.dispatch(
+                &peer("transport-binding-0001"),
+                &desktop(true, false),
+                &InputAction::Key {
+                    code: "KeyA".into(),
+                    pressed: true,
+                },
+                now,
+            )
+            .expect("test dispatch");
+        }
+        assert_eq!(releases.get(), 1);
     }
 
     #[test]

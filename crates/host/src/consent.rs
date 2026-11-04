@@ -34,6 +34,7 @@ pub enum LocalDecision {
 struct Grant {
     peer: AuthenticatedPeer,
     windows_session_id: String,
+    granted_at: Instant,
     expires_at: Instant,
 }
 
@@ -141,6 +142,7 @@ impl ConsentController {
         self.grant = Some(Grant {
             peer: pending.peer,
             windows_session_id: pending.windows_session_id,
+            granted_at: now,
             expires_at,
         });
         self.phase = ConsentPhase::Approved;
@@ -169,7 +171,9 @@ impl ConsentController {
             ConsentPhase::Approved => {}
         }
         let grant = self.grant.as_ref().ok_or(HostError::Unauthorized)?;
-        if now >= grant.expires_at {
+        // A callback timestamp cannot authorize input retroactively. Treat
+        // time regression like expiry so HostSession revokes and releases input.
+        if now < grant.granted_at || now >= grant.expires_at {
             return Err(HostError::Expired);
         }
         // An OS user-session switch is a desktop-loss event, not merely a
