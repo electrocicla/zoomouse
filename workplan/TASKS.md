@@ -1,5 +1,22 @@
 # Zoomouse — orchestrator task list
 
+## R13 active engineering wave — 2026-11-06 (source != native acceptance)
+
+The canonical high-level plan is [R13-EXECUTION-PLAN.md](R13-EXECUTION-PLAN.md). Initial main HEAD `709c60c95eb3`, origin/main 0/0, six inherited media owned paths + 4 protected owner dirty paths + R12-authored TASKS diff. R13 revalidated the media delta and published exact six files `d851bb4ca5ac` with tracked `termrun_2a182dc8444a4bc2b8f8adae9831ff6c`: cargo fmt/check/test 12/12/clippy all exit0; verified origin/main 0/0. NO actual H.264/video, trusted native LAN, approval/input, EXE, APK or physical A01–A17.
+
+| ID | Priority | Exclusive owner paths | Evidence-based status / next gate |
+| --- | --- | --- | --- |
+| R13-MEDIA-RECOVERY | P0 | `crates/media/**`, `workers/R11-M2-MEDIA.md` (six paths total) | **SOURCE PUBLISHED d851bb4ca5ac**, four Rust checks PASS, no hardware capture/encoder/network or native M2 acceptance |
+| R13-HOST | P0 | Independent `crates/host/**`, NEW `workers/R13-HOST.md` | deployment e97e8b83-2543-4ead-bea5-b6716b12c4e2 child `deployment-child-fbe3e698ce3dfbfde5425aa0dae74c0b`, authenticated connectedAt 2026-11-06T21:32:06.482Z; source work IN PROGRESS, cannot grant trust on synthetic DTLS |
+| R13-WINDOWS | P0 | Independent `apps/windows/**` and `crates/control/**`, NEW `workers/R13-WINDOWS.md` | deployment ffc47fbc-cda2-4eed-9017-8f842ed8e031 child `deployment-child-7d75c97df8acc87b9f91bd6363b461d9` authenticated connectedAt 2026-11-06T21:34:04.215Z; source IN PROGRESS, native consent/input unaccepted, no EXE package |
+| R13-ANDROID | P0 | Independent `apps/mobile/**`, NEW `workers/R13-ANDROID.md` | deployment `7654ddf1-e844-4f6e-9988-e7fbe9a93343` child `deployment-child-1ab0198818fd07bdd7bb82d1be953f52` authenticated connectedAt 2026-11-06T21:36:11.868Z; source IN PROGRESS, SDK37/BuildTools37/NDK28.2/JDK+official Gradle wrapper still native gate |
+| R13-NATIVE-M1 | P0 OWNER | Android↔Windows11 private LAN physical acceptance | **A01–A17 NOT RUN; NO secure DTLS/OS-local approval/input grant, APK or EXE accepted** |
+| R13-NATIVE-M2 | P1 OWNER | WGC/D3D11/MF H.264/WebRTC/Android decode+cursor-follow measured | **BLOCKED** until M1 trusted session and hardware approval; no synthetic acceptance |
+| R13-WAN | deferred | separate owner-approved architecture | **NOT STARTED**; no public bind/internet fallback |
+
+Protected owner-unresolved paths remain `.gitignore`, `package.json`, `pnpm-lock.yaml`, `workers/R6-WIN.md`. This file carried a verified uncommitted R12 evidence-only status diff before R13; R13 preserves and explicitly adopts it for a parent-only publication with the new section. No child may stage this file.
+
+
 Update statuses only against verified work. The parent owns this file; workers write independent `workplan/workers/<task-id>.md` and Agents Global semantic logs.
 
 | ID | Priority | Phase | Description / observable acceptance | Owner | Status | Dependencies |
@@ -62,16 +79,16 @@ Source-only completion must not advance physical M1/M2/M3/M4 acceptance. See [R1
 
 R10-WIN-SESSION/R10-ANDROID-CHANNEL/R10-HOST-CHANNEL remain unassigned READY source tasks; M1/M2/M3/M4 remain unaccepted.
 
-## R11 native implementation wave (2026-11-04; see [R11-EXECUTION-PLAN.md](R11-EXECUTION-PLAN.md))
+## R11 native implementation wave — R12 evidence checkpoint (2026-11-04; [R11-EXECUTION-PLAN.md](R11-EXECUTION-PLAN.md))
 
-| ID | Priority | Exclusive file ownership | Observable outcome | Status |
+| ID | Priority | Exclusive file ownership | Observable outcome / remaining security gates | Status |
 |---|---|---|---|---|
-| R11-WIN-SESSION | P0 | `apps/windows/**` + `workers/R11-WIN-NATIVE-SESSION.md` | OS-observed Windows interactive desktop/session signal, native guards and tests; no renderer-minted consent | DELEGATED, authenticated child `deployment-child-ca8e9ce0995e1030e9b6c0404b75e96f` connected 2026-11-04T17:49:24Z; result pending |
-| R11-ANDROID-CHANNEL | P0 | `apps/mobile/**` + `workers/R11-ANDROID-NATIVE-CHANNEL.md` | Native-ready Android secure-channel contracts, fail-closed lifecycle, tooling readiness with exact receipts | DELEGATED, authenticated child `deployment-child-03cf1637dab8b51db9e6f1d51fd95ebb` connected 2026-11-04T17:51:39Z; result pending |
-| R11-HOST-CHANNEL | P0 | `crates/host/**` + `workers/R11-HOST-CHANNEL.md` | Authenticated/native host proof integration and adversarial QA without forged authority | DELEGATED, authenticated child `deployment-child-a9def09068fe4d40b404367748dc2b59` connected 2026-11-04T17:54:27Z; result pending |
-| R11-M2-MEDIA | P1 | `crates/media/**` + `workers/R11-M2-MEDIA.md` | D3D11/MF crop/encode source work that never bypasses consent/transport or asserts real media E2E | Deployment `d5440820-87f7-45c3-a99a-733806fad4e3`, child `deployment-child-e4f148a172c4dff711af8cf0486e4694` submitted 2026-11-04T17:55:12Z; authenticated connectedAt 2026-11-04T17:56:12Z; result pending |
-| R11-ORCH | P0 | `workplan/{R11-EXECUTION-PLAN,PLAN,TASKS,WORKLOG,README}.md` | Plan, Agents Global identities, claims, scoped commits/push receipts and native acceptance gap reconciliation | ACTIVE |
-| R11-ARTIFACTS-E2E | P0 | Owner/run-only native artifacts and physical A01–A17 | Actual Windows EXE + Android APK builds/install, encrypted LAN input, real local approval, revocation | BLOCKED: real native authority, Android SDK37/Gradle wrapper and device acceptance unverified |
-| R11-M2-M4 | P1/P2 | Subsequent assigned disjoint scopes | WGC/video WebRTC/zoom real device and performance, M3 UX parity, M4 internet | BACKLOG, M1 security prerequisite |
+| R11-WIN-SESSION | P0 | `apps/windows/**` + `workers/R11-WIN-NATIVE-SESSION.md` | OS-observed interactive desktop/session probe and hidden-tray revoke; Windows Rust fmt/check/6 tests/clippy + Node 9/TS/lint/Vite eight checks exit0 `termrun_9b997ede64f54becbc14bc743e1f835d`. Source `37d2e0ae7231` and worker-doc `d551d3e71a62` pushed origin0/0. No native physical consent/DTLS or real input E2E. | **SOURCE PUBLISHED; NATIVE NOT ACCEPTED** |
+| R11-HOST-CHANNEL | P0 | `crates/host/**` + `workers/R11-HOST-CHANNEL.md` | Monotonic callback grant lower-bound and best-effort held-input release at teardown; Cargo fmt/check/test **62 unit+1 doc**/strict clippy exit0, source+docs `5b497b74aaac` pushed origin0/0. Native OS-local consent and authenticated live DTLS/SCTP still disabled. | **SOURCE PUBLISHED; NATIVE NOT ACCEPTED** |
+| R11-M2-MEDIA | P1 | `crates/media/**` + `workers/R11-M2-MEDIA.md` | Real WinRT `IDirect3DSurface.Description()` validates actual GPU surface metadata after consent-bound admission, with strict validation; five tracked Cargo fmt/check/test **12 unit**/clippy exit0 (see worker note). Six media-owned paths independently rechecked by R13: tracked media fmt/check/test (12 unit)/strict clippy all exit0 `termrun_2a182dc8444a4bc2b8f8adae9831ff6c`, then exact 6-file commit `d851bb4ca5ac` pushed origin/main 0/0. No hardware H.264 output. | **SOURCE PUBLISHED R13; NATIVE NOT ACCEPTED** |
+| R11-ANDROID-CHANNEL | P0 | `apps/mobile/**` + `workers/R11-ANDROID-NATIVE-CHANNEL.md` | Original Android `deployment-child-03cf1637dab8b51db9e6f1d51fd95ebb` saved nine source files but hit reconciliation-only; same-task successor pre-Send principal guards rejected, handoff cancelled **without ACK or grant transfer**. Independent recovery `deployment-child-6f3d71372cc653905a11c41c2066d3c3` preserved nine files, completed tracked readiness **5**, Vitest **104**, TS and lint exit0; preflight exit1 expected (missing official Gradle wrapper, SDK37/BuildTools37/NDK28). Scoped `709c60c95eb3` pushed origin0/0. No APK or native DTLS grant. | **SOURCE PUBLISHED; TOOLCHAIN/NATIVE NOT ACCEPTED** |
+| R11-ORCH | P0 | `workplan/{R11-EXECUTION-PLAN,PLAN,TASKS,WORKLOG,README}.md` | R12 authenticated same logical parent task `zoomouse-r11-orchestration-20261104`, predecessor canonical handoff ACK, Agents Global coordinating existing workers and one independent Android recovery. Preserved four pre-existing owner dirty files; no worker-source staging. | **ACTIVE; MEDIA PUBLICATION FOLLOW-UP** |
+| R11-ARTIFACTS-E2E | P0 | Owner-authorized native artifacts / physical A01–A17 | Reproducible Win11 raw EXE/Android APK, official verified Gradle wrapper + SDK37, OS-local grant, mutually authenticated DTLS peer, real LAN input/revoke, physical E2E **NOT RUN**. | **BLOCKED; NOT ACCEPTED** |
+| R11-M2-M4 | P1/P2 | Separate later disjoint owners | WGC/D3D11 crop, MF H.264, WebRTC/SRTP to Android decode, cursor-follow zoom/benchmarks, UX parity, optional internet threat model. | **BACKLOG; M1 SECURITY PREREQUISITE** |
 
 **Acceptance invariant:** R11 source tests, successful compilation, package creation and physical security acceptance are distinct. Do not advance M1–M4 on source-only evidence.
