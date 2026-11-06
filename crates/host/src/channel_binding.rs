@@ -26,10 +26,12 @@ pub(crate) enum ChannelProofError {
     Expired,
     Reused,
     InvalidSignature,
+    AssociationChanged,
 }
 
 /// All fields must originate from one established DTLS/SCTP connection, not
 /// separately from signaling or an untrusted JSON body. No public constructor.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ObservedEncryptedChannel {
     pub(crate) host_pairing_key: [u8; 32],
     pub(crate) enrolled_phone_key: [u8; 32],
@@ -37,6 +39,9 @@ pub(crate) struct ObservedEncryptedChannel {
     pub(crate) peer_dtls_certificate_sha256: [u8; 32],
     pub(crate) dtls_exporter: [u8; 32],
     pub(crate) sctp_stream_id: u16,
+    /// OS-native connection epoch, local-only and never copied from signaling.
+    /// A reconnect must increment it even when certificates/exporter repeat.
+    pub(crate) association_generation: u64,
 }
 
 /// Fixed-size, one-use proof challenge. The digest is NOT a channel receipt
@@ -46,6 +51,7 @@ pub(crate) struct ChannelProofChallenge {
     enrolled_phone_key: VerifyingKey,
     created_at: Instant,
     consumed: bool,
+    association: ObservedEncryptedChannel,
 }
 
 fn valid_nonzero(bytes: &[u8; 32]) -> bool {
@@ -78,6 +84,7 @@ impl ChannelProofChallenge {
             || !valid_nonzero(&observation.local_dtls_certificate_sha256)
             || !valid_nonzero(&observation.peer_dtls_certificate_sha256)
             || !valid_nonzero(&observation.dtls_exporter)
+            || observation.association_generation == 0
         {
             return Err(ChannelProofError::InvalidObservation);
         }
@@ -96,6 +103,7 @@ impl ChannelProofChallenge {
                 enrolled_phone_key,
                 created_at: now,
                 consumed: false,
+                association: observation.clone(),
             },
             host_nonce,
         ))
@@ -106,6 +114,7 @@ impl ChannelProofChallenge {
     pub(crate) fn finish(
         &mut self,
         signature: &[u8; 64],
+        fresh_observation: Option<&ObservedEncryptedChannel>,
         now: Instant,
     ) -> Result<(), ChannelProofError> {
         if self.consumed {
@@ -114,6 +123,13 @@ impl ChannelProofChallenge {
         self.consumed = true;
         if now < self.created_at || now.duration_since(self.created_at) >= PROOF_TTL {
             return Err(ChannelProofError::Expired);
+        }
+        // The trusted native producer must re-observe the SAME established
+        // association immediately before finishing; disconnect, reconnect,
+        // peer switch or loss of the observed stream burns the proof.
+        // This comparison alone cannot attest a real backend or grant input.
+        if fresh_observation != Some(&self.association) {
+            return Err(ChannelProofError::AssociationChanged);
         }
         self.enrolled_phone_key
             .verify_strict(&self.digest, &Signature::from_bytes(signature))
@@ -134,6 +150,7 @@ mod tests {
             peer_dtls_certificate_sha256: [3; 32],
             dtls_exporter: [4; 32],
             sctp_stream_id: 17,
+            association_generation: 1,
         }
     }
 
@@ -147,9 +164,12 @@ mod tests {
         let signature = phone
             .sign(&transcript_digest(&observation, &nonce))
             .to_bytes();
-        assert_eq!(challenge.finish(&signature, now), Ok(()));
         assert_eq!(
-            challenge.finish(&signature, now),
+            challenge.finish(&signature, Some(&observation), now),
+            Ok(())
+        );
+        assert_eq!(
+            challenge.finish(&signature, Some(&observation), now),
             Err(ChannelProofError::Reused)
         );
     }
@@ -175,11 +195,11 @@ mod tests {
                 .sign(&transcript_digest(&substituted, &nonce))
                 .to_bytes();
             assert_eq!(
-                challenge.finish(&signature, now),
+                challenge.finish(&signature, Some(&observation), now),
                 Err(ChannelProofError::InvalidSignature)
             );
             assert_eq!(
-                challenge.finish(&signature, now),
+                challenge.finish(&signature, Some(&observation), now),
                 Err(ChannelProofError::Reused)
             );
         }
@@ -197,7 +217,7 @@ mod tests {
             .sign(&transcript_digest(&observation, &nonce))
             .to_bytes();
         assert_eq!(
-            challenge.finish(&signature, now),
+            challenge.finish(&signature, Some(&observation), now),
             Err(ChannelProofError::InvalidSignature)
         );
         let (mut second, second_nonce) =
@@ -207,7 +227,7 @@ mod tests {
             .sign(&transcript_digest(&observation, &nonce))
             .to_bytes();
         assert_eq!(
-            second.finish(&old_signature, now),
+            second.finish(&old_signature, Some(&observation), now),
             Err(ChannelProofError::InvalidSignature)
         );
     }
@@ -222,16 +242,20 @@ mod tests {
             .sign(&transcript_digest(&observation, &nonce))
             .to_bytes();
         assert_eq!(
-            expired.finish(&signature, now + PROOF_TTL),
+            expired.finish(&signature, Some(&observation), now + PROOF_TTL),
             Err(ChannelProofError::Expired)
         );
         assert_eq!(
-            expired.finish(&signature, now),
+            expired.finish(&signature, Some(&observation), now),
             Err(ChannelProofError::Reused)
         );
         let (mut backward, _) = ChannelProofChallenge::start(&observation, now).expect("valid");
         assert_eq!(
-            backward.finish(&signature, now - Duration::from_nanos(1)),
+            backward.finish(
+                &signature,
+                Some(&observation),
+                now - Duration::from_nanos(1)
+            ),
             Err(ChannelProofError::Expired)
         );
     }
@@ -247,7 +271,11 @@ mod tests {
             .sign(&transcript_digest(&observation, &nonce))
             .to_bytes();
         assert_eq!(
-            before.finish(&signature, now + PROOF_TTL - Duration::from_nanos(1)),
+            before.finish(
+                &signature,
+                Some(&observation),
+                now + PROOF_TTL - Duration::from_nanos(1)
+            ),
             Ok(())
         );
 
@@ -257,11 +285,11 @@ mod tests {
             .sign(&transcript_digest(&observation, &deadline_nonce))
             .to_bytes();
         assert_eq!(
-            at_deadline.finish(&deadline_signature, now + PROOF_TTL),
+            at_deadline.finish(&deadline_signature, Some(&observation), now + PROOF_TTL),
             Err(ChannelProofError::Expired)
         );
         assert_eq!(
-            at_deadline.finish(&deadline_signature, now),
+            at_deadline.finish(&deadline_signature, Some(&observation), now),
             Err(ChannelProofError::Reused)
         );
     }
@@ -279,11 +307,11 @@ mod tests {
         let mut malformed = valid;
         malformed[0] ^= 0x80;
         assert_eq!(
-            challenge.finish(&malformed, now),
+            challenge.finish(&malformed, Some(&observation), now),
             Err(ChannelProofError::InvalidSignature)
         );
         assert_eq!(
-            challenge.finish(&valid, now),
+            challenge.finish(&valid, Some(&observation), now),
             Err(ChannelProofError::Reused)
         );
     }
@@ -306,6 +334,65 @@ mod tests {
                 Err(ChannelProofError::InvalidObservation)
             ));
         }
+    }
+
+    #[test]
+    fn observed_native_association_is_rechecked_and_consumed_on_switch_or_close() {
+        let now = Instant::now();
+        let phone = SigningKey::from_bytes(&[9; 32]);
+        let observation = observed(&phone);
+
+        // Even correct Ed25519 possession for the prior DTLS association
+        // cannot survive closure, reconnect, peer replacement or stream switch.
+        for case in 0..8 {
+            let (mut challenge, nonce) =
+                ChannelProofChallenge::start(&observation, now).expect("fixture");
+            let signature = phone
+                .sign(&transcript_digest(&observation, &nonce))
+                .to_bytes();
+            let mut refreshed = observation.clone();
+            match case {
+                0 => {} // Missing association: transport was closed.
+                1 => refreshed.association_generation += 1,
+                2 => refreshed.dtls_exporter[0] ^= 1,
+                3 => refreshed.local_dtls_certificate_sha256[0] ^= 1,
+                4 => refreshed.peer_dtls_certificate_sha256[0] ^= 1,
+                5 => refreshed.sctp_stream_id ^= 1,
+                6 => refreshed.host_pairing_key[0] ^= 1,
+                _ => refreshed.enrolled_phone_key[0] ^= 1,
+            }
+            let current = (case != 0).then_some(&refreshed);
+            assert_eq!(
+                challenge.finish(&signature, current, now),
+                Err(ChannelProofError::AssociationChanged),
+                "association change case {case}"
+            );
+            assert_eq!(
+                challenge.finish(&signature, Some(&observation), now),
+                Err(ChannelProofError::Reused),
+                "stale proof cannot revive after returning to old connection"
+            );
+        }
+    }
+
+    #[test]
+    fn association_generation_is_local_not_signed_and_zero_is_rejected() {
+        let now = Instant::now();
+        let phone = SigningKey::from_bytes(&[9; 32]);
+        let mut observation = observed(&phone);
+        let nonce = [7; 32];
+        let digest = transcript_digest(&observation, &nonce);
+        observation.association_generation += 1;
+        assert_eq!(
+            transcript_digest(&observation, &nonce),
+            digest,
+            "local epoch must not silently alter the pinned 245-byte wire transcript"
+        );
+        observation.association_generation = 0;
+        assert!(matches!(
+            ChannelProofChallenge::start(&observation, now),
+            Err(ChannelProofError::InvalidObservation)
+        ));
     }
 
     #[test]
