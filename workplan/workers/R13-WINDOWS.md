@@ -44,4 +44,6 @@ All commands executed in visible agent-managed PowerShell, cwd `I:\\Zoomouse`, t
 - **Unaccepted gates:** no backend-observed real encrypted DataChannel, live Win11 OS-user-native approval UI, production `InputBackend` SendInput binding, physical lock/UAC/revoke proof, real Android/Win11 LAN input, WGC media/WebRTC, .exe/.apk, or owner physical A01–A17; pure unit tests are NOT device acceptance.
 
 ## Publication receipt
-Owned source commit SHA and push receipt will be appended after scoped Git FIFO publication. Do not infer SHA or native acceptance from this pre-commit entry.
+- **Validated source commit** `2aa23c32a14e` (`fix(windows): fail closed on desktop recovery and input cleanup failures`) on `main`; staged exactly `apps/windows/src-tauri/src/lib.rs`, `crates/control/src/native.rs`, `crates/control/src/executor.rs`, `workplan/workers/R13-WINDOWS.md`, verified no foreign staged paths. Specialized `notcode_git_commit` succeeded.
+- **Verified source push:** specialized `notcode_git_push` `origin/main` updated `5f2bedb` → `2aa23c3`; read-only subsequent Git summary HEAD `2aa23c32a14e`, ahead=0/behind=0. Source checks and tracked runs above precede this receipt. Protected foreign dirty and Android pending work still unstaged/untouched; source-only acceptance.
+- This SHA/push receipt is added by an independent *worker-log-only follow-up commit* so the record cites the actual source SHA, not an invented pre-commit hash. No binaries/installers, runtime permission or device acceptance claimed.
