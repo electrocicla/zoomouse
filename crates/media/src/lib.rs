@@ -108,6 +108,8 @@ pub struct CropPlan {
 }
 impl CropPlan {
     pub fn new(source: Size, crop: CropRect, output: Size) -> Result<Self, MediaError> {
+        Size::new(source.width, source.height)?;
+        Size::new(output.width, output.height)?;
         CropRect::new(crop.left, crop.top, crop.width, crop.height, source)?;
         if !output.width.is_multiple_of(2)
             || !output.height.is_multiple_of(2)
@@ -136,6 +138,7 @@ pub struct EncodeProfile {
 }
 impl EncodeProfile {
     pub fn new(output: Size, fps: u8, bitrate_bps: u32) -> Result<Self, MediaError> {
+        Size::new(output.width, output.height).map_err(|_| MediaError::InvalidProfile)?;
         if !output.width.is_multiple_of(2)
             || !output.height.is_multiple_of(2)
             || u64::from(output.width) * u64::from(output.height) > MAX_OUTPUT_PIXELS
@@ -307,6 +310,10 @@ impl<A: MediaAuthorization> MediaSession<A> {
         profile: EncodeProfile,
         in_flight_limit: usize,
     ) -> Result<Self, MediaError> {
+        // Public metadata structs can be assembled without their constructors.
+        // Revalidate at the trusted admission boundary before retaining a session.
+        Size::new(dimensions.width, dimensions.height)?;
+        EncodeProfile::new(profile.output, profile.fps, profile.bitrate_bps)?;
         if source.local_sequence == 0 || scope.generation() == 0 {
             return Err(MediaError::InvalidIdentity);
         }
@@ -588,6 +595,56 @@ mod tests {
         ));
         s.revoke();
         assert!(matches!(s.verify_output(&one), Err(MediaError::Revoked)));
+    }
+    #[test]
+    fn forged_public_metadata_cannot_bypass_pixel_and_profile_limits() {
+        let invalid_source = Size {
+            width: 10_000,
+            height: 2,
+        };
+        let crop = CropRect {
+            left: 0,
+            top: 0,
+            width: 2,
+            height: 2,
+        };
+        assert_eq!(
+            CropPlan::new(invalid_source, crop, Size::new(2, 2).unwrap()),
+            Err(MediaError::InvalidDimensions)
+        );
+        let invalid_output = Size {
+            width: 10_000,
+            height: 2,
+        };
+        assert_eq!(
+            CropPlan::new(size(), plan().crop, invalid_output),
+            Err(MediaError::InvalidDimensions)
+        );
+        assert_eq!(
+            EncodeProfile::new(invalid_output, 30, 2_000_000),
+            Err(MediaError::InvalidProfile)
+        );
+        let scope = CaptureScope::new("peer-1".into(), "session-1234567890".into(), 2).unwrap();
+        assert!(matches!(
+            MediaSession::new(
+                DenyAll,
+                scope.clone(),
+                source(),
+                invalid_source,
+                profile(),
+                1
+            ),
+            Err(MediaError::InvalidDimensions)
+        ));
+        let forged_profile = EncodeProfile {
+            output: Size::new(1280, 720).unwrap(),
+            fps: 0,
+            bitrate_bps: 2_000_000,
+        };
+        assert!(matches!(
+            MediaSession::new(DenyAll, scope, source(), size(), forged_profile, 1),
+            Err(MediaError::InvalidProfile)
+        ));
     }
     #[test]
     fn rejects_invalid_source_and_capacity() {

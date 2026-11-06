@@ -13,5 +13,12 @@ path = "src/lib.rs"
 [dependencies]
 zoomouse-capture = { path = "../capture" }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+  "Graphics",
+  "Graphics_DirectX",
+  "Graphics_DirectX_Direct3D11",
+] }
+
 [lints.rust]
 unsafe_code = "deny"
