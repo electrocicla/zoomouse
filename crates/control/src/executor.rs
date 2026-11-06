@@ -232,4 +232,80 @@ mod tests {
         exec.revoke().unwrap();
         assert!(exec.state.held_buttons().is_empty());
     }
+
+    #[test]
+    fn failed_possible_key_down_with_failed_cleanup_is_terminal_until_release_retry() {
+        let mut exec = Executor::new(
+            Spy {
+                fail_emit: true,
+                fail_release: true,
+                ..Spy::default()
+            },
+            "authorized-session-0001".into(),
+        );
+        let down = frame(
+            1,
+            Action::Key {
+                key: Key::ControlLeft,
+                direction: Direction::Down,
+            },
+        );
+        assert_eq!(
+            exec.dispatch_authorized(&down, 10_000),
+            Err(ExecutionError::CleanupFailed)
+        );
+        assert!(exec.cleanup_failed());
+        assert!(exec.state.held_keys().contains(&Key::ControlLeft));
+        assert!(exec.state.terminated());
+        exec.sink.fail_emit = false;
+        exec.sink.fail_release = false;
+        assert_eq!(
+            exec.dispatch_authorized(&frame(2, Action::ReleaseAll), 10_000),
+            Err(ExecutionError::Rejected(Reject::Terminated))
+        );
+        exec.revoke().expect("cleanup retry");
+        assert!(!exec.cleanup_failed());
+        assert!(exec.state.held_keys().is_empty());
+        assert!(exec.state.terminated(), "successful cleanup cannot regrant");
+    }
+
+    #[test]
+    fn drop_attempts_release_of_held_input_without_network_or_renderer_callbacks() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        struct Releases(Rc<Cell<usize>>);
+        impl Sink for Releases {
+            fn emit(&mut self, _: &Action) -> Result<(), ()> {
+                Ok(())
+            }
+            fn release(&mut self, keys: &BTreeSet<Key>, _: &BTreeSet<Button>) -> Result<(), ()> {
+                if keys.contains(&Key::ShiftLeft) {
+                    self.0.set(self.0.get() + 1);
+                }
+                Ok(())
+            }
+        }
+
+        let count = Rc::new(Cell::new(0));
+        {
+            let mut exec = Executor::new(
+                Releases(Rc::clone(&count)),
+                "authorized-session-0001".into(),
+            );
+            exec.dispatch_authorized(
+                &frame(
+                    1,
+                    Action::Key {
+                        key: Key::ShiftLeft,
+                        direction: Direction::Down,
+                    },
+                ),
+                10_000,
+            )
+            .expect("test-only private executor");
+            assert_eq!(count.get(), 0);
+        }
+        assert_eq!(count.get(), 1);
+    }
 }

@@ -30,6 +30,7 @@ enum ReleaseOutcome {
 struct LocalHostState<B: InputBackend> {
     session: HostSession<B>,
     last_release: ReleaseOutcome,
+    last_desktop: DesktopObservation,
 }
 
 impl<B: InputBackend> LocalHostState<B> {
@@ -37,6 +38,7 @@ impl<B: InputBackend> LocalHostState<B> {
         Self {
             session: HostSession::new(backend),
             last_release: ReleaseOutcome::NotAttempted,
+            last_desktop: DesktopObservation::Unavailable,
         }
     }
 
@@ -51,13 +53,29 @@ impl<B: InputBackend> LocalHostState<B> {
         result
     }
 
-    // Loss of the local input desktop or console session revokes and releases.
-    // Do not overwrite a latched cleanup failure on repeat negative samples.
+    // A lock, secure desktop or console switch revokes immediately. A failed
+    // native release may be impossible *during* a secure desktop; retry once
+    // the interactive desktop is observed again, without restoring authority.
+    // Repeated unavailable samples must not erase or flood failed cleanup.
     fn observe_desktop(&mut self, desktop: DesktopObservation) {
-        if desktop == DesktopObservation::Unavailable
-            && self.session.phase() != ConsentPhase::Revoked
-        {
-            let _ = self.stop();
+        let desktop_restored = self.last_desktop == DesktopObservation::Unavailable
+            && desktop == DesktopObservation::InteractiveDefault;
+        self.last_desktop = desktop;
+        match desktop {
+            DesktopObservation::Unavailable if self.session.phase() != ConsentPhase::Revoked => {
+                let _ = self.stop();
+            }
+            DesktopObservation::InteractiveDefault
+                if desktop_restored
+                    && (self.session.cleanup_failed()
+                        || self.last_release == ReleaseOutcome::Failed) =>
+            {
+                // Retry only on the lock/unlock edge, not on every 500ms
+                // observation. The backend separately verifies current OS
+                // context; a successful probe cannot create a grant.
+                let _ = self.stop();
+            }
+            _ => {}
         }
     }
 
@@ -106,9 +124,16 @@ fn phase_label(phase: ConsentPhase) -> &'static str {
 fn host_status(host: State<'_, LocalHost>) -> Result<HostStatus, String> {
     // Native Win32 reads are independent of renderer/network claims.
     let desktop = observe().unwrap_or(DesktopObservation::Unavailable);
-    let mut current = host
-        .lock()
-        .map_err(|_| "host lock unavailable".to_owned())?;
+    let mut current = match host.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            // A panic while holding mutable host state invalidates authority.
+            // Salvage a best-effort release even though status is untrusted.
+            let mut guard = poisoned.into_inner();
+            let _ = guard.stop();
+            return Err("host lock poisoned; access revoked".to_owned());
+        }
+    };
     current.observe_desktop(desktop);
     Ok(current.status(desktop))
 }
@@ -116,17 +141,21 @@ fn host_status(host: State<'_, LocalHost>) -> Result<HostStatus, String> {
 /// Explicitly exposed UI command: deny/release, never grant.
 #[tauri::command]
 fn emergency_stop(host: State<'_, LocalHost>) -> Result<(), String> {
+    // Emergency release must still be attempted after a Rust panic poisons
+    // the mutex. Poison is never a reason to preserve an input grant.
     let mut current = host
         .lock()
-        .map_err(|_| "host lock unavailable".to_owned())?;
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     current.stop().map_err(|error| error.to_string())
 }
 
 fn try_revoke(state: &LocalHost) -> bool {
-    match state.lock() {
-        Ok(mut host) => host.stop().is_ok(),
-        Err(_) => false,
-    }
+    // Revoke is fail-safe cleanup, not a read of trusted approval. Recover the
+    // poisoned guard and attempt key/button release instead of giving up.
+    let mut host = state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    host.stop().is_ok()
 }
 
 fn tray_icon() -> Image<'static> {
@@ -206,8 +235,14 @@ pub fn run() -> tauri::Result<()> {
                     std::thread::sleep(Duration::from_millis(500));
                     let desktop = observe().unwrap_or(DesktopObservation::Unavailable);
                     let state = observer_app.state::<LocalHost>();
-                    if let Ok(mut host) = state.lock() {
-                        host.observe_desktop(desktop);
+                    match state.lock() {
+                        Ok(mut host) => host.observe_desktop(desktop),
+                        Err(poisoned) => {
+                            // A panic invalidates all native authority even if
+                            // the next desktop probe is positive.
+                            let mut host = poisoned.into_inner();
+                            let _ = host.stop();
+                        }
                     };
                 })?;
             Ok(())
@@ -291,5 +326,115 @@ mod tests {
         assert_eq!(status.last_release_outcome, ReleaseOutcome::Failed);
         assert!(status.cleanup_failed);
         assert!(!status.input_enabled);
+    }
+
+    #[test]
+    fn unlock_retries_failed_cleanup_without_regrant_or_spamming_while_locked() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        struct ReleaseAfterUnlock(Rc<Cell<usize>>);
+        impl InputBackend for ReleaseAfterUnlock {
+            fn dispatch(&mut self, _: &InputAction) -> Result<(), HostError> {
+                Err(HostError::Unauthorized)
+            }
+            fn release_all(&mut self) -> Result<(), HostError> {
+                let count = self.0.get() + 1;
+                self.0.set(count);
+                if count == 1 {
+                    Err(HostError::CleanupFailed)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        let calls = Rc::new(Cell::new(0));
+        let mut host = LocalHostState::new(ReleaseAfterUnlock(Rc::clone(&calls)));
+        host.observe_desktop(DesktopObservation::InteractiveDefault);
+        assert_eq!(calls.get(), 0);
+        host.observe_desktop(DesktopObservation::Unavailable);
+        assert_eq!(calls.get(), 1);
+        assert_eq!(host.session.phase(), ConsentPhase::Revoked);
+        assert!(host.status(DesktopObservation::Unavailable).cleanup_failed);
+        host.observe_desktop(DesktopObservation::Unavailable);
+        assert_eq!(calls.get(), 1, "locked samples must not flood release");
+        host.observe_desktop(DesktopObservation::InteractiveDefault);
+        assert_eq!(calls.get(), 2, "recovered desktop retries native release");
+        assert!(
+            !host
+                .status(DesktopObservation::InteractiveDefault)
+                .cleanup_failed
+        );
+        assert_eq!(host.last_release, ReleaseOutcome::Confirmed);
+        host.observe_desktop(DesktopObservation::InteractiveDefault);
+        assert_eq!(calls.get(), 2, "successful release is not repeated");
+        assert_eq!(host.session.phase(), ConsentPhase::Revoked);
+        assert!(
+            !host
+                .status(DesktopObservation::InteractiveDefault)
+                .input_enabled
+        );
+    }
+
+    #[test]
+    fn poisoned_host_mutex_still_attempts_tray_emergency_release() {
+        let host: LocalHost = Mutex::new(LocalHostState::new(DisabledInput));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = host.lock().expect("initial lock");
+            panic!("simulate native state panic");
+        }));
+        assert!(caught.is_err());
+        assert!(host.is_poisoned());
+        assert!(
+            try_revoke(&host),
+            "poison must not bypass emergency release"
+        );
+        let guard = match host.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        assert_eq!(guard.session.phase(), ConsentPhase::Revoked);
+        assert_eq!(guard.last_release, ReleaseOutcome::Confirmed);
+    }
+
+    #[test]
+    fn persistent_release_failure_retries_only_on_desktop_recovery_edges() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        struct AlwaysFails(Rc<Cell<usize>>);
+        impl InputBackend for AlwaysFails {
+            fn dispatch(&mut self, _: &InputAction) -> Result<(), HostError> {
+                Err(HostError::Unauthorized)
+            }
+            fn release_all(&mut self) -> Result<(), HostError> {
+                self.0.set(self.0.get() + 1);
+                Err(HostError::CleanupFailed)
+            }
+        }
+
+        let count = Rc::new(Cell::new(0));
+        let mut host = LocalHostState::new(AlwaysFails(Rc::clone(&count)));
+        host.observe_desktop(DesktopObservation::Unavailable);
+        assert_eq!(count.get(), 1);
+        for _ in 0..10 {
+            host.observe_desktop(DesktopObservation::Unavailable);
+        }
+        assert_eq!(count.get(), 1);
+        host.observe_desktop(DesktopObservation::InteractiveDefault);
+        assert_eq!(count.get(), 2);
+        for _ in 0..10 {
+            host.observe_desktop(DesktopObservation::InteractiveDefault);
+        }
+        assert_eq!(count.get(), 2, "no repeated SendInput release flood");
+        host.observe_desktop(DesktopObservation::Unavailable);
+        host.observe_desktop(DesktopObservation::InteractiveDefault);
+        assert_eq!(count.get(), 3, "new recovery edge permits another attempt");
+        assert_eq!(host.session.phase(), ConsentPhase::Revoked);
+        assert!(
+            host.status(DesktopObservation::InteractiveDefault)
+                .cleanup_failed
+        );
     }
 }

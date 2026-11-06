@@ -25,6 +25,23 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 /// must remain impossible without reviewed HostSession integration.
 pub(super) struct NativeInput;
 
+// Compare the exact terminated UOI_NAME byte count, never a lossy Unicode
+// string, prefix, truncated buffer, or embedded-NUL alias.
+fn exact_default_name(name: &[u16], bytes_needed: u32) -> bool {
+    const DEFAULT: [u16; 8] = [
+        b'D' as u16,
+        b'e' as u16,
+        b'f' as u16,
+        b'a' as u16,
+        b'u' as u16,
+        b'l' as u16,
+        b't' as u16,
+        0,
+    ];
+    bytes_needed == (size_of::<[u16; 8]>() as u32)
+        && name.get(..DEFAULT.len()) == Some(DEFAULT.as_slice())
+}
+
 fn is_default_desktop(handle: *mut core::ffi::c_void) -> bool {
     let mut name = [0u16; 64];
     let mut bytes_needed = 0u32;
@@ -39,8 +56,7 @@ fn is_default_desktop(handle: *mut core::ffi::c_void) -> bool {
             &mut bytes_needed,
         )
     };
-    let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
-    ok != 0 && bytes_needed > 0 && String::from_utf16_lossy(&name[..end]) == "Default"
+    ok != 0 && exact_default_name(&name, bytes_needed)
 }
 
 fn can_inject() -> bool {
@@ -66,8 +82,9 @@ fn can_inject() -> bool {
     let thread = unsafe { GetThreadDesktop(GetCurrentThreadId()) };
     let allowed = !thread.is_null() && is_default_desktop(input) && is_default_desktop(thread);
     // SAFETY: input handle originates from successful OpenInputDesktop.
-    unsafe { CloseDesktop(input) };
-    allowed
+    // A failed close is an uncertain Win32 observation, not authority.
+    let closed = unsafe { CloseDesktop(input) } != 0;
+    allowed && closed
 }
 
 fn send(events: &[INPUT]) -> Result<(), ()> {
@@ -221,5 +238,37 @@ impl Sink for NativeInput {
         } else {
             Err(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::exact_default_name;
+
+    #[test]
+    fn desktop_name_must_be_exactly_terminated_and_byte_bounded() {
+        let default: Vec<u16> = "Default\0".encode_utf16().collect();
+        assert!(exact_default_name(&default, 16));
+        assert!(!exact_default_name(&default, 0));
+        assert!(!exact_default_name(&default, 14));
+        assert!(!exact_default_name(&default, 18));
+        for spoof in [
+            "Default",
+            "DefaultOther\0",
+            "Winlogon\0",
+            "Default\0garbage",
+        ] {
+            let encoded: Vec<u16> = spoof.encode_utf16().collect();
+            assert!(!exact_default_name(
+                &encoded,
+                (encoded.len() * std::mem::size_of::<u16>()) as u32
+            ));
+        }
+        let mut terminated_prefix = default;
+        terminated_prefix.extend("evil".encode_utf16());
+        assert!(!exact_default_name(
+            &terminated_prefix,
+            (terminated_prefix.len() * std::mem::size_of::<u16>()) as u32
+        ));
     }
 }
