@@ -18,7 +18,8 @@ export type LanAttemptState =
   | Readonly<{ phase: "native-link-unverified"; attemptId: number; candidate: LanBootstrapCandidate }>
   | Readonly<{ phase: "closing" }>
   | Readonly<{ phase: "blocked"; reason:
-    "invalid-candidate" | "native-transport-unavailable" | "native-transport-failed" | "cleanup-failed" }>;
+    "invalid-candidate" | "app-not-active" | "native-transport-unavailable" |
+    "native-transport-failed" | "cleanup-failed" }>;
 
 export interface NativeSecureLanPort {
   /**
@@ -72,6 +73,7 @@ export class LanAttemptCoordinator {
   private cleanupFailed = false;
   private pendingOpenId: number | null = null;
   private disconnectClose: Promise<void> | null = null;
+  private foreground: boolean;
 
   /** A cancelled native open may settle after the first close. Close again
    * before allowing a new attempt, so late native resources cannot survive. */
@@ -88,13 +90,29 @@ export class LanAttemptCoordinator {
     }
   }
 
-  constructor(private readonly native: NativeSecureLanPort = createUnavailableNativeLanPort()) {}
+  constructor(
+    private readonly native: NativeSecureLanPort = createUnavailableNativeLanPort(),
+    initiallyForeground = true,
+  ) {
+    this.foreground = initiallyForeground;
+  }
 
   get state(): LanAttemptState { return this.stateValue; }
+
+  /** AppState is an additional JS-side denial gate, never native authority.
+   * Synchronously revoke the chance to start before async native close. */
+  setForeground(active: boolean): Promise<LanAttemptState> {
+    this.foreground = active;
+    return active ? Promise.resolve(this.stateValue) : this.disconnect();
+  }
 
   async open(intent: LanConnectIntent): Promise<LanAttemptState> {
     if (this.cleanupFailed) return this.stateValue;
     if (this.active !== null || this.stateValue.phase === "closing") return this.stateValue;
+    if (!this.foreground) {
+      this.stateValue = { phase: "blocked", reason: "app-not-active" };
+      return this.stateValue;
+    }
 
     const candidate = candidateFor(intent);
     if (candidate === null) {

@@ -47,7 +47,9 @@ export const ManualIpScreen = ({ coordinator, onBack }: {
           ? "La limpieza nativa falló. Reinicia la aplicación antes de intentar otra conexión."
           : state.reason === "invalid-candidate"
             ? "La dirección o el puerto no son válidos."
-            : "No hay un canal Android DTLS autenticado disponible. No se envió ningún control."
+            : state.reason === "app-not-active"
+              ? "La aplicación no está en primer plano. No se permite iniciar un canal."
+              : "No hay un canal Android DTLS autenticado disponible. No se envió ningún control."
         : "Introducir IP y puerto no autentica al host ni habilita el control remoto.";
 
   return (

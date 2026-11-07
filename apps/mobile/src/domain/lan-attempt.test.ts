@@ -212,6 +212,65 @@ describe("Android native LAN attempt boundary", () => {
     expect(opens).toBe(1);
   });
 
+  it("rejects attempts while backgrounded and requires explicit foreground recovery", async () => {
+    const opened: number[] = [];
+    const closed: number[] = [];
+    const coordinator = new LanAttemptCoordinator(nativePort(
+      async attemptId => { opened.push(attemptId); },
+      async attemptId => { closed.push(attemptId); },
+    ), false);
+    expect(await coordinator.open(intent)).toEqual({ phase: "blocked", reason: "app-not-active" });
+    expect(opened).toEqual([]);
+    await coordinator.setForeground(true);
+    expect((await coordinator.open(intent)).phase).toBe("native-link-unverified");
+    expect(opened).toEqual([1]);
+    expect(await coordinator.setForeground(false)).toEqual({ phase: "idle" });
+    expect(closed).toEqual([1]);
+    expect(await coordinator.open(qrIntent)).toEqual({ phase: "blocked", reason: "app-not-active" });
+    await coordinator.setForeground(true);
+    expect((await coordinator.open(qrIntent)).phase).toBe("native-link-unverified");
+    expect(opened).toEqual([1, 2]);
+    expect(canSendInputFromLanAttempt(coordinator.state)).toBe(false);
+  });
+
+  it("does not reopen after foreground resumes during cancellation-after-open", async () => {
+    let finishOpen: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => { finishOpen = resolve; });
+    const opened: number[] = [];
+    const closed: number[] = [];
+    const coordinator = new LanAttemptCoordinator(nativePort(
+      async attemptId => {
+        opened.push(attemptId);
+        if (attemptId === 1) await gate;
+      },
+      async attemptId => { closed.push(attemptId); },
+    ), true);
+    const inFlight = coordinator.open(qrIntent);
+    expect(await coordinator.setForeground(false)).toEqual({ phase: "closing" });
+    await coordinator.setForeground(true);
+    // A new peer cannot be admitted before the old late-open is closed again.
+    expect((await coordinator.open(intent)).phase).toBe("closing");
+    expect(opened).toEqual([1]);
+    finishOpen?.();
+    expect((await inFlight).phase).toBe("idle");
+    expect(closed).toEqual([1, 1]);
+    expect((await coordinator.open(intent)).phase).toBe("native-link-unverified");
+    expect(opened).toEqual([1, 2]);
+    expect(canSendInputFromLanAttempt(coordinator.state)).toBe(false);
+  });
+
+  it("keeps app background cleanup errors latched after foreground return", async () => {
+    const coordinator = new LanAttemptCoordinator(nativePort(
+      async () => undefined,
+      async () => { throw new Error("close failed"); },
+    ));
+    expect((await coordinator.open(qrIntent)).phase).toBe("native-link-unverified");
+    expect(await coordinator.setForeground(false)).toEqual({ phase: "blocked", reason: "cleanup-failed" });
+    await coordinator.setForeground(true);
+    expect(await coordinator.open(intent)).toEqual({ phase: "blocked", reason: "cleanup-failed" });
+    expect(canSendInputFromLanAttempt(coordinator.state)).toBe(false);
+  });
+
   it("disconnect is idempotent without an active session", async () => {
     const coordinator = new LanAttemptCoordinator();
     expect(await coordinator.disconnect()).toEqual({ phase: "idle" });

@@ -1,5 +1,7 @@
 import { createUnavailableNativeLanPort, NativeLanUnavailableError } from "./lan-attempt";
 import type { NativeSecureLanPort } from "./lan-attempt";
+import type { LanBootstrapCandidate } from "./lan-bootstrap";
+import { parsePrivateIpv4 } from "./network";
 
 /**
  * The Kotlin module is deliberately deny-only until audited native DTLS/SCTP,
@@ -24,9 +26,32 @@ function nativeModule(value: unknown): SecureLanNativeModule | null {
   return candidate as unknown as SecureLanNativeModule;
 }
 
+/** Validate untrusted JS values even when a caller bypasses TypeScript. */
+function validAttemptId(id: number): boolean {
+  return Number.isSafeInteger(id) && id > 0;
+}
+
+function validPinnedCandidate(candidate: LanBootstrapCandidate): candidate is Extract<LanBootstrapCandidate, { kind: "qr-host-key-pin" }> {
+  if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) return false;
+  return candidate.kind === "qr-host-key-pin" && candidate.trust === "key-pin-only" &&
+    typeof candidate.ipv4 === "string" && parsePrivateIpv4(candidate.ipv4) === candidate.ipv4 &&
+    Number.isInteger(candidate.port) && candidate.port > 0 && candidate.port <= 65535 &&
+    typeof candidate.hostPublicKeyHex === "string" &&
+    /^[0-9a-f]{64}$/.test(candidate.hostPublicKeyHex) && !/^0+$/.test(candidate.hostPublicKeyHex);
+}
+
+const NATIVE_DENIAL_CODES = new Set([
+  "E_NATIVE_CHANNEL_UNAVAILABLE",
+  "E_NATIVE_CHANNEL_INACTIVE",
+  "E_NATIVE_CHANNEL_STALE_ATTEMPT",
+  "E_NATIVE_CHANNEL_INVALID_ATTEMPT",
+  "E_NATIVE_CHANNEL_INVALID_PORT",
+]);
+
 function unavailableRejection(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
-  return (error as { code?: unknown }).code === "E_NATIVE_CHANNEL_UNAVAILABLE";
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === "string" && NATIVE_DENIAL_CODES.has(code);
 }
 
 /**
@@ -41,7 +66,7 @@ export function createAndroidNativeLanPort(candidateModule: unknown): NativeSecu
 
   return {
     open: async (attemptId, candidate, signal) => {
-      if (signal.aborted || candidate.kind !== "qr-host-key-pin") {
+      if (signal.aborted || !validAttemptId(attemptId) || !validPinnedCandidate(candidate)) {
         throw new NativeLanUnavailableError();
       }
       try {
@@ -57,6 +82,7 @@ export function createAndroidNativeLanPort(candidateModule: unknown): NativeSecu
       throw new NativeLanUnavailableError();
     },
     close: async attemptId => {
+      if (!validAttemptId(attemptId)) throw new NativeLanUnavailableError();
       // A future native backend must close the exact attempt and release
       // resources; failure is retained by LanAttemptCoordinator fail-closed.
       await module.closeAttempt(attemptId);

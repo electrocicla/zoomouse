@@ -1,19 +1,43 @@
 package com.zoomouse.mobile
 
+import com.facebook.react.bridge.LifecycleEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
 /**
- * Deliberately disabled production boundary until a reviewed Android DTLS/SCTP
- * implementation can prove the pinned peer key and the native channel binding.
- * JS endpoints, QR hints, and successful bridge calls cannot mint authority.
- *
- * No sockets, credentials, held input, permissions or background services exist.
+ * Deliberately deny-only: OS foreground and monotonic attempt checks are
+ * necessary containment, not proof of peer identity, DTLS/SCTP, exporter
+ * binding or Windows OS-local consent. No sockets/input/capture are installed.
  */
-class SecureLanModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+class SecureLanModule(context: ReactApplicationContext) :
+    ReactContextBaseJavaModule(context), LifecycleEventListener {
+    private val fence = SecureLanAttemptFence()
+
+    init {
+        context.addLifecycleEventListener(this)
+    }
+
     override fun getName(): String = "ZoomouseSecureLan"
+
+    override fun onHostResume() {
+        fence.onForeground()
+    }
+
+    override fun onHostPause() {
+        fence.onBackground()
+    }
+
+    override fun onHostDestroy() {
+        fence.onDestroyed()
+    }
+
+    override fun invalidate() {
+        fence.onDestroyed()
+        reactApplicationContext.removeLifecycleEventListener(this)
+        super.invalidate()
+    }
 
     @ReactMethod
     fun openSecureChannel(
@@ -23,16 +47,21 @@ class SecureLanModule(context: ReactApplicationContext) : ReactContextBaseJavaMo
         pinnedHostPublicKeyHex: String?,
         promise: Promise,
     ) {
-        // Intentionally ignore all untrusted arguments: there is no crypto backend.
-        promise.reject(
-            "E_NATIVE_CHANNEL_UNAVAILABLE",
-            "No authenticated Android DTLS/SCTP producer or pinned host proof is installed.",
-        )
+        // Ignore all untrusted host/QR arguments. Only an independently
+        // authenticated native peer producer may ever authorize a channel.
+        // This implementation ALWAYS rejects, including after foreground.
+        val denial = fence.rejectOpen(attemptId, port)
+        promise.reject(denial, "No authenticated Android DTLS/SCTP channel or native consent proof is installed.")
     }
 
     @ReactMethod
     fun closeAttempt(attemptId: Double, promise: Promise) {
-        // Idempotent by design. This disabled module never creates resources.
-        promise.resolve(null)
+        val invalid = fence.closeAttempt(attemptId)
+        if (invalid != null) {
+            promise.reject(invalid, "Invalid native attempt identifier.")
+        } else {
+            // Safe for repeated close: the deny-only module creates no resources.
+            promise.resolve(null)
+        }
     }
 }

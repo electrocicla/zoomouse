@@ -24,16 +24,18 @@ export default function App() {
   const coordinatorRef = useRef<LanAttemptCoordinator | null>(null);
   if (coordinatorRef.current === null) {
     const module: unknown = NativeModules.ZoomouseSecureLan;
-    coordinatorRef.current = new LanAttemptCoordinator(createAndroidNativeLanPort(module));
+    // No native attempt before an explicit active AppState notification.
+    coordinatorRef.current = new LanAttemptCoordinator(createAndroidNativeLanPort(module), false);
   }
   const coordinator = coordinatorRef.current;
   useEffect(() => {
+    void coordinator.setForeground(AppState.currentState === "active");
     const subscription = AppState.addEventListener("change", state => {
-      if (state !== "active") void coordinator.disconnect();
+      void coordinator.setForeground(state === "active");
     });
     return () => {
       subscription.remove();
-      void coordinator.disconnect();
+      void coordinator.setForeground(false);
     };
   }, [coordinator]);
   const goDevices = () => setRoute("devices");

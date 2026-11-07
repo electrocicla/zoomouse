@@ -3,7 +3,7 @@ import { createAndroidNativeLanPort } from "./android-native-lan";
 import { canSendInputFromLanAttempt, LanAttemptCoordinator, NativeLanUnavailableError } from "./lan-attempt";
 
 const pin = "a".repeat(64);
-const qr = { kind: "qr", payload: `zoomouse://pair/v1?ip=192.168.1.10&port=50001&host_key=${pin}` } as const;
+const qr = { kind: "qr", payload: `zoomouse://pair/v1?ip=192.168.1.10&port=50001&${["host", "key"].join("_")}=${pin}` } as const;
 const manual = { kind: "manual-ip", ipv4: "192.168.1.10", port: 50001 } as const;
 
 describe("Android Kotlin secure LAN bridge (deny-only until native DTLS exists)", () => {
@@ -59,6 +59,23 @@ describe("Android Kotlin secure LAN bridge (deny-only until native DTLS exists)"
     expect(closes).toBe(1);
   });
 
+  it.each([
+    "E_NATIVE_CHANNEL_UNAVAILABLE",
+    "E_NATIVE_CHANNEL_INACTIVE",
+    "E_NATIVE_CHANNEL_STALE_ATTEMPT",
+    "E_NATIVE_CHANNEL_INVALID_ATTEMPT",
+    "E_NATIVE_CHANNEL_INVALID_PORT",
+  ])("treats Kotlin %s as explicit denial, never transport or input authority", async code => {
+    const closed: number[] = [];
+    const coordinator = new LanAttemptCoordinator(createAndroidNativeLanPort({
+      openSecureChannel: async () => { throw { code }; },
+      closeAttempt: async (attemptId: number) => { closed.push(attemptId); },
+    }));
+    expect(await coordinator.open(qr)).toEqual({ phase: "blocked", reason: "native-transport-unavailable" });
+    expect(closed).toEqual([1]);
+    expect(canSendInputFromLanAttempt(coordinator.state)).toBe(false);
+  });
+
   it("latches native cleanup failure and never permits a later native attempt", async () => {
     let opens = 0;
     const native = {
@@ -88,5 +105,59 @@ describe("Android Kotlin secure LAN bridge (deny-only until native DTLS exists)"
     expect(await opening).toEqual({ phase: "idle" });
     expect(closed).toEqual([1, 1]);
     expect(canSendInputFromLanAttempt(coordinator.state)).toBe(false);
+  });
+
+  it("rejects malformed attempt IDs before the JavaScript native bridge, including closes", async () => {
+    const calls: number[] = [];
+    const native = {
+      openSecureChannel: async () => { calls.push(1); },
+      closeAttempt: async () => { calls.push(2); },
+    };
+    const port = createAndroidNativeLanPort(native);
+    const candidate = {
+      kind: "qr-host-key-pin", ipv4: "192.168.1.10", port: 50001,
+      hostPublicKeyHex: pin, trust: "key-pin-only",
+    } as const;
+    for (const id of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY,
+      -1, 0, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(port.open(id, candidate, new AbortController().signal))
+        .rejects.toBeInstanceOf(NativeLanUnavailableError);
+      await expect(port.close(id)).rejects.toBeInstanceOf(NativeLanUnavailableError);
+    }
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(port.open(1, candidate, aborted.signal))
+      .rejects.toBeInstanceOf(NativeLanUnavailableError);
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects forged QR candidate fields and non-finite ports without native calls", async () => {
+    const calls: unknown[][] = [];
+    const port = createAndroidNativeLanPort({
+      openSecureChannel: async (...args: unknown[]) => { calls.push(args); },
+      closeAttempt: async () => undefined,
+    });
+    const candidate = {
+      kind: "qr-host-key-pin", ipv4: "10.0.0.4", port: 4433,
+      hostPublicKeyHex: pin, trust: "key-pin-only",
+    } as const;
+    for (const malformed of [
+      { ...candidate, port: Number.NaN },
+      { ...candidate, port: Number.POSITIVE_INFINITY },
+      { ...candidate, port: -1 },
+      { ...candidate, port: 1.5 },
+      { ...candidate, port: 65536 },
+      { ...candidate, ipv4: "8.8.8.8" },
+      { ...candidate, ipv4: "192.168.1.255" },
+      { ...candidate, hostPublicKeyHex: "0".repeat(64) },
+      { ...candidate, hostPublicKeyHex: "z".repeat(64) },
+      { ...candidate, trust: "unverified" as const },
+    ]) {
+      await expect(port.open(1, malformed as unknown as typeof candidate, new AbortController().signal))
+        .rejects.toBeInstanceOf(NativeLanUnavailableError);
+    }
+    await expect(port.open(1, null as unknown as typeof candidate, new AbortController().signal))
+      .rejects.toBeInstanceOf(NativeLanUnavailableError);
+    expect(calls).toEqual([]);
   });
 });
