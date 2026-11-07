@@ -29,6 +29,8 @@ pub(crate) struct VerifiedChannelEvidence {
     public_key: [u8; 32],
     session_id: String,
     channel_binding_id: String,
+    /// Nonzero native DTLS/SCTP association epoch, not from network packets.
+    association_generation: u64,
 }
 
 /// A native pairing callback must produce this only after the locally
@@ -51,6 +53,7 @@ pub(crate) struct NativeApprovalReceipt {
     device_id: String,
     session_id: String,
     channel_binding_id: String,
+    association_generation: u64,
     windows_user_session_id: String,
     decision: LocalDecision,
 }
@@ -170,6 +173,9 @@ impl<B: InputBackend> HostAdmission<B> {
         display_name: String,
         now: Instant,
     ) -> Result<ConsentRequest, HostError> {
+        if channel.association_generation == 0 {
+            return Err(HostError::Unauthorized);
+        }
         if self.host.cleanup_failed() {
             return Err(HostError::CleanupFailed);
         }
@@ -211,6 +217,8 @@ impl<B: InputBackend> HostAdmission<B> {
     pub(crate) fn decide_session_locally(
         &mut self,
         receipt: &NativeApprovalReceipt,
+        // Fresh native transport observation, never a callback or renderer field.
+        fresh_observation: Option<&VerifiedChannelEvidence>,
         desktop: &DesktopContext,
         now: Instant,
         lease: Duration,
@@ -219,7 +227,8 @@ impl<B: InputBackend> HostAdmission<B> {
             .pending_channel
             .take()
             .ok_or(HostError::InvalidApproval)?;
-        if receipt.request_nonce != pending.request_nonce
+        if fresh_observation != Some(&pending.channel)
+            || receipt.request_nonce != pending.request_nonce
             || now < pending.opened_at
             || now.duration_since(pending.opened_at) >= MAX_PENDING_NATIVE_CONSENT
             || !desktop.can_receive_input()
@@ -227,6 +236,7 @@ impl<B: InputBackend> HostAdmission<B> {
             || receipt.device_id != pending.channel.device_id
             || receipt.session_id != pending.channel.session_id
             || receipt.channel_binding_id != pending.channel.channel_binding_id
+            || receipt.association_generation != pending.channel.association_generation
             || receipt.windows_user_session_id != desktop.user_session_id()
             || !self.pairing.has_local_enrollment(
                 &pending.channel.device_id,
@@ -264,10 +274,17 @@ impl<B: InputBackend> HostAdmission<B> {
     pub(crate) fn dispatch_verified_frame(
         &mut self,
         frame: &VerifiedInputFrame,
+        // New view of the actual native DTLS association; frame identity alone cannot prove liveness.
+        fresh_observation: Option<&VerifiedChannelEvidence>,
         desktop: &DesktopContext,
         now: Instant,
     ) -> Result<(), HostError> {
         if self.active_channel.as_ref() != Some(&frame.channel) {
+            return Err(HostError::WrongSession);
+        }
+        if fresh_observation != Some(&frame.channel) {
+            // A closed/reconnected association invalidates held native input.
+            self.emergency_stop()?;
             return Err(HostError::WrongSession);
         }
         let next = self.ingress.as_ref().ok_or(HostError::Unauthorized)?.next(
@@ -485,6 +502,7 @@ mod tests {
             public_key: hello.public_key,
             session_id: "verified-session-0001".into(),
             channel_binding_id: "dtls-exporter-binding-0001".into(),
+            association_generation: 1,
         }
     }
 
@@ -502,6 +520,7 @@ mod tests {
             device_id: channel.device_id.clone(),
             session_id: channel.session_id.clone(),
             channel_binding_id: channel.channel_binding_id.clone(),
+            association_generation: channel.association_generation,
             windows_user_session_id: desktop(false).user_session_id().to_owned(),
             decision,
         }
@@ -513,12 +532,153 @@ mod tests {
             .expect("pending");
         host.decide_session_locally(
             &receipt(host, &channel, LocalDecision::Approve),
+            Some(&channel),
             &desktop(false),
             now,
             Duration::from_secs(90),
         )
         .expect("local session");
         channel
+    }
+
+    #[test]
+    fn missing_or_reconnected_native_observation_burns_pending_local_consent() {
+        for changed_epoch in [false, true] {
+            let now = Instant::now();
+            let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+            let channel = prepare(&mut host, now);
+            host.request_session(channel.clone(), &desktop(false), "Phone".into(), now)
+                .expect("pending");
+            let callback = receipt(&host, &channel, LocalDecision::Approve);
+            let mut refreshed = channel.clone();
+            refreshed.association_generation += 1;
+            let observed = changed_epoch.then_some(&refreshed);
+            assert_eq!(
+                host.decide_session_locally(
+                    &callback,
+                    observed,
+                    &desktop(false),
+                    now,
+                    Duration::from_secs(90)
+                ),
+                Err(HostError::InvalidApproval)
+            );
+            assert!(host.pending_channel.is_none());
+            assert!(host.active_channel.is_none());
+            assert_eq!(host.phase(), ConsentPhase::Revoked);
+            assert_eq!(host.host.test_backend().count, 0);
+            assert_eq!(host.host.test_backend().releases, 1);
+            assert_eq!(
+                host.decide_session_locally(
+                    &callback,
+                    Some(&channel),
+                    &desktop(false),
+                    now,
+                    Duration::from_secs(90)
+                ),
+                Err(HostError::InvalidApproval),
+                "stale callback must never revive after observation returns"
+            );
+        }
+    }
+
+    #[test]
+    fn native_callback_epoch_mismatch_consumes_request_and_never_grants() {
+        let now = Instant::now();
+        let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+        let channel = prepare(&mut host, now);
+        host.request_session(channel.clone(), &desktop(false), "Phone".into(), now)
+            .expect("pending");
+        let mut callback = receipt(&host, &channel, LocalDecision::Approve);
+        callback.association_generation += 1;
+        assert_eq!(
+            host.decide_session_locally(
+                &callback,
+                Some(&channel),
+                &desktop(false),
+                now,
+                Duration::from_secs(90)
+            ),
+            Err(HostError::InvalidApproval)
+        );
+        assert_eq!(host.phase(), ConsentPhase::Revoked);
+        assert_eq!(host.host.test_backend().releases, 1);
+    }
+
+    #[test]
+    fn zero_native_association_generation_is_not_admitted() {
+        let now = Instant::now();
+        let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+        let mut channel = prepare(&mut host, now);
+        channel.association_generation = 0;
+        assert_eq!(
+            host.request_session(channel, &desktop(false), "Phone".into(), now),
+            Err(HostError::Unauthorized)
+        );
+        assert_eq!(host.phase(), ConsentPhase::Denied);
+        assert!(host.pending_channel.is_none());
+        assert_eq!(
+            host.bootstrap_status(),
+            BootstrapStatus::DisabledMissingNativeAuthority
+        );
+    }
+
+    #[test]
+    fn native_association_loss_or_reconnect_revokes_and_releases_held_input() {
+        for changed_epoch in [false, true] {
+            let now = Instant::now();
+            let mut host = HostAdmission::new(CountingInput::default()).expect("entropy");
+            let channel = approved(&mut host, now);
+            assert_eq!(
+                host.dispatch_verified_frame(
+                    &frame(
+                        &channel,
+                        1,
+                        40,
+                        InputAction::Key {
+                            code: "KeyA".into(),
+                            pressed: true
+                        }
+                    ),
+                    Some(&channel),
+                    &desktop(false),
+                    now
+                ),
+                Ok(())
+            );
+            let mut reconnect = channel.clone();
+            reconnect.association_generation += 1;
+            let observed = changed_epoch.then_some(&reconnect);
+            assert_eq!(
+                host.dispatch_verified_frame(
+                    &frame(
+                        &channel,
+                        2,
+                        40,
+                        InputAction::Key {
+                            code: "KeyA".into(),
+                            pressed: false
+                        }
+                    ),
+                    observed,
+                    &desktop(false),
+                    now
+                ),
+                Err(HostError::WrongSession)
+            );
+            assert_eq!(host.host.test_backend().count, 1);
+            assert_eq!(host.host.test_backend().releases, 1);
+            assert_eq!(host.phase(), ConsentPhase::Revoked);
+            assert_eq!(
+                host.dispatch_verified_frame(
+                    &frame(&channel, 3, 40, InputAction::Text("replay".into())),
+                    Some(&channel),
+                    &desktop(false),
+                    now
+                ),
+                Err(HostError::WrongSession)
+            );
+        }
     }
 
     #[test]
@@ -566,6 +726,7 @@ mod tests {
         );
         host.decide_session_locally(
             &receipt(&host, &channel, LocalDecision::Deny),
+            Some(&channel),
             &desktop(false),
             now,
             Duration::from_secs(90),
@@ -603,6 +764,7 @@ mod tests {
         assert_eq!(host.phase(), ConsentPhase::Pending);
         host.decide_session_locally(
             &receipt(&host, &channel, LocalDecision::Approve),
+            Some(&channel),
             &desktop(false),
             now,
             Duration::from_secs(90),
@@ -624,7 +786,13 @@ mod tests {
             DesktopContext::from_local_os("windows-user-session-02".into(), true, false)
                 .expect("other local OS user");
         assert_eq!(
-            host.decide_session_locally(&callback, &another_user, now, Duration::from_secs(90)),
+            host.decide_session_locally(
+                &callback,
+                Some(&channel),
+                &another_user,
+                now,
+                Duration::from_secs(90)
+            ),
             Err(HostError::InvalidApproval)
         );
         assert!(host.pending_channel.is_none());
@@ -633,7 +801,13 @@ mod tests {
         assert_eq!(host.host.test_backend().count, 0);
         assert_eq!(host.host.test_backend().releases, 1);
         assert_eq!(
-            host.decide_session_locally(&callback, &desktop(false), now, Duration::from_secs(90)),
+            host.decide_session_locally(
+                &callback,
+                Some(&channel),
+                &desktop(false),
+                now,
+                Duration::from_secs(90)
+            ),
             Err(HostError::InvalidApproval)
         );
         assert!(host
@@ -756,7 +930,13 @@ mod tests {
         let mut forged = receipt(&host, &channel, LocalDecision::Approve);
         forged.channel_binding_id = "another-verified-channel".into();
         assert_eq!(
-            host.decide_session_locally(&forged, &desktop(false), now, Duration::from_secs(90)),
+            host.decide_session_locally(
+                &forged,
+                Some(&channel),
+                &desktop(false),
+                now,
+                Duration::from_secs(90)
+            ),
             Err(HostError::InvalidApproval)
         );
         assert_eq!(host.phase(), ConsentPhase::Revoked);
@@ -776,6 +956,7 @@ mod tests {
         assert_eq!(
             host.decide_session_locally(
                 &callback,
+                Some(&channel),
                 &desktop(false),
                 now + MAX_PENDING_NATIVE_CONSENT,
                 Duration::from_secs(90)
@@ -786,7 +967,13 @@ mod tests {
         assert!(host.pending_channel.is_none());
         assert!(host.active_channel.is_none());
         assert_eq!(
-            host.decide_session_locally(&callback, &desktop(false), now, Duration::from_secs(90)),
+            host.decide_session_locally(
+                &callback,
+                Some(&channel),
+                &desktop(false),
+                now,
+                Duration::from_secs(90)
+            ),
             Err(HostError::InvalidApproval)
         );
     }
@@ -811,6 +998,7 @@ mod tests {
             assert_eq!(
                 host.decide_session_locally(
                     &callback,
+                    Some(&channel),
                     &desktop(false),
                     decision_time,
                     Duration::from_secs(90)
@@ -862,12 +1050,12 @@ mod tests {
         let channel = approved(&mut host, now);
         let first = frame(&channel, 1, 40, InputAction::Text("ok".into()));
         assert_eq!(
-            host.dispatch_verified_frame(&first, &desktop(false), now),
+            host.dispatch_verified_frame(&first, Some(&channel), &desktop(false), now),
             Ok(())
         );
         assert_eq!(host.host.test_backend().count, 1);
         assert_eq!(
-            host.dispatch_verified_frame(&first, &desktop(false), now),
+            host.dispatch_verified_frame(&first, Some(&channel), &desktop(false), now),
             Err(HostError::InvalidFrame)
         );
         assert_eq!(host.host.test_backend().count, 1);
@@ -876,6 +1064,7 @@ mod tests {
         assert_eq!(
             host.dispatch_verified_frame(
                 &frame(&channel, 2, 40, InputAction::Text("x".into())),
+                Some(&channel),
                 &desktop(false),
                 now
             ),
@@ -905,6 +1094,7 @@ mod tests {
             assert_eq!(
                 host.dispatch_verified_frame(
                     &frame(&channel, 1, length, action),
+                    Some(&channel),
                     &desktop(false),
                     now
                 ),
@@ -929,6 +1119,7 @@ mod tests {
         assert_eq!(
             host.dispatch_verified_frame(
                 &frame(&foreign, 1, 40, InputAction::Text("x".into())),
+                Some(&channel),
                 &desktop(false),
                 now
             ),
@@ -939,6 +1130,7 @@ mod tests {
         assert_eq!(
             host.dispatch_verified_frame(
                 &frame(&channel, 1, 40, InputAction::Text("accepted".into())),
+                Some(&channel),
                 &desktop(false),
                 now
             ),
@@ -959,6 +1151,7 @@ mod tests {
             let action = InputAction::PointerDelta { dx: 1.0, dy: 1.0 };
             host.dispatch_verified_frame(
                 &frame(&channel, sequence, 32, action),
+                Some(&channel),
                 &desktop(false),
                 now,
             )
@@ -972,6 +1165,7 @@ mod tests {
                     32,
                     InputAction::PointerDelta { dx: 1.0, dy: 1.0 }
                 ),
+                Some(&channel),
                 &desktop(false),
                 now
             ),
