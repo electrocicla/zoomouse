@@ -1,5 +1,21 @@
 # Zoomouse — orchestrator task list
 
+## R14 implementation wave — 2026-11-06 (native admission still OFF)
+
+Execution plan: [R14-EXECUTION-PLAN.md](R14-EXECUTION-PLAN.md). R14 own rootIndex13 Zoomouse, canonical main HEAD `1fb3b9ea6c83`, origin/main ahead0/behind0, 15 initial local dirty/untracked files (eleven R13 Android unpublished + four protected owner/provenance). Source-only R13 media/host/Windows receipts remain published; no real M1 or M2 native gates are accepted.
+
+| ID | Priority | Exclusive owner | Status / next verifiable gate |
+|---|---|---|---|
+| R14-PARENT | P0 | `workplan/{R14-EXECUTION-PLAN,TASKS,WORKLOG}.md` | Plan created; review native trust path and reconcile only authenticated child source/test/Git results; staged/pushed parent-doc evidence TBD. |
+| R14-ANDROID-RECOVERY | P0 FIRST | `apps/mobile/**`, NEW `workers/R14-ANDROID-RECOVERY.md` | R13 left 11 unpublished Android paths. Independent new deployment `68d680c9-3cfc-4d4a-9275-e8601738c2ab`, child `deployment-child-1acdca5ee989dba87dcf7e14c920e337` requested 2026-11-07T02:16Z, **submission/connection pending** at initial task record. Recover exact patches, tracked TS/lint/test/preflight and Kotlin JUnit only with actual toolchain, scoped commit/push. |
+| R14-HOST-TRUST | P0 | `crates/host/**`, NEW `workers/R14-HOST-TRUST.md` | Independent worker only after completed Android deployment connection and new preflight. Backend observed real DTLS/SCTP provenance not present; keep input disabled. |
+| R14-WINDOWS-TRUST | P0 | `apps/windows/**`, `crates/control/**`, NEW `workers/R14-WINDOWS-TRUST.md` | Independent worker after authenticated host deployment; genuine Win11 host-local consent/cleanup unimplemented, fail closed. |
+| R14-M1-NATIVE | OWNER | physical Android/Windows, `ACCEPTANCE-M1.md` | **A01–A17 NOT RUN**; no actual authenticated native DTLS+OS-local grant/input; raw EXE/APK not authorized or built. |
+| R14-M2 | P1 GATED | media+viewport+Android decoder later | WGC GPU crop/H264/WebRTC + cursor-follow physical E2E and metrics unavailable; no synthetic acceptance. |
+| R14-M4 | DEFERRED | separate architecture | WAN/public listener OFF. |
+
+Protected owner paths `.gitignore`, `package.json`, `pnpm-lock.yaml`, `workers/R6-WIN.md` must not be staged, stashed, reset or overwritten. Root pnpm check covers protocol/preview only; wrapper/SDK native preflight independent. Worker `connectedAt` proves lifecycle only, not test or implementation success.
+
 ## R13 active engineering wave — 2026-11-06 (source != native acceptance)
 
 The canonical high-level plan is [R13-EXECUTION-PLAN.md](R13-EXECUTION-PLAN.md). Initial main HEAD `709c60c95eb3`, origin/main 0/0, six inherited media owned paths + 4 protected owner dirty paths + R12-authored TASKS diff. R13 revalidated the media delta and published exact six files `d851bb4ca5ac` with tracked `termrun_2a182dc8444a4bc2b8f8adae9831ff6c`: cargo fmt/check/test 12/12/clippy all exit0; verified origin/main 0/0. NO actual H.264/video, trusted native LAN, approval/input, EXE, APK or physical A01–A17.
