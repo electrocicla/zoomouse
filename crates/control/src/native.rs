@@ -23,7 +23,49 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 
 /// Intentionally unexported. Creating/calling this from an untrusted DataChannel
 /// must remain impossible without reviewed HostSession integration.
-pub(super) struct NativeInput;
+/// A Unicode SendInput key-down may have been accepted even when its paired
+/// key-up was not. Executor's ordinary held Key set cannot represent UTF-16
+/// KEYEVENTF_UNICODE events, so retain this native cleanup debt explicitly.
+#[derive(Default)]
+pub(super) struct NativeInput {
+    pending_text_key_up: Option<u16>,
+}
+
+impl NativeInput {
+    /// Record each possible text key-down BEFORE the native call. Only a
+    /// confirmed key-up clears the debt; a partial SendInput batch must not
+    /// permit the generic executor cleanup to report false success.
+    fn emit_text_with<F>(&mut self, value: &str, mut emit: F) -> Result<(), ()>
+    where
+        F: FnMut(u16, Direction) -> Result<(), ()>,
+    {
+        // A prior failed release is terminal. Do not overwrite its evidence
+        // with another code unit, even if a caller bypasses Executor.
+        if self.pending_text_key_up.is_some() {
+            return Err(());
+        }
+        for unit in value.encode_utf16() {
+            self.pending_text_key_up = Some(unit);
+            emit(unit, Direction::Down)?;
+            emit(unit, Direction::Up)?;
+            self.pending_text_key_up = None;
+        }
+        Ok(())
+    }
+
+    /// Called by Sink::release on revoke, native error and Executor::drop.
+    /// Failed release remains pending for a future desktop-recovery retry.
+    fn retry_text_key_up<F>(&mut self, mut emit_up: F) -> Result<(), ()>
+    where
+        F: FnMut(u16) -> Result<(), ()>,
+    {
+        if let Some(unit) = self.pending_text_key_up {
+            emit_up(unit)?;
+            self.pending_text_key_up = None;
+        }
+        Ok(())
+    }
+}
 
 // Compare the exact terminated UOI_NAME byte count, never a lossy Unicode
 // string, prefix, truncated buffer, or embedded-NUL alias.
@@ -175,6 +217,11 @@ fn button_event(button: Button, direction: Direction) -> INPUT {
 
 impl Sink for NativeInput {
     fn emit(&mut self, action: &Action) -> Result<(), ()> {
+        // An uncertain Unicode key-down/up is terminal for every subsequent
+        // native action, not just Text. Only release() may discharge debt.
+        if self.pending_text_key_up.is_some() {
+            return Err(());
+        }
         match action {
             Action::Move { dx, dy } => send(&[mouse(
                 MOUSEEVENTF_MOVE,
@@ -202,18 +249,17 @@ impl Sink for NativeInput {
                 },
             )]),
             Action::Text(value) => {
-                // KEYEVENTF_UNICODE does not use keyboard layout or clipboard.
-                // Partial SendInput can leave an event in flight: attempt all
-                // matching key-ups even when a batch fails.
-                for unit in value.encode_utf16() {
-                    let down = key_event(0, unit, KEYEVENTF_UNICODE);
-                    let up = key_event(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP);
-                    if send(&[down, up]).is_err() {
-                        let _ = send(&[up]);
-                        return Err(());
-                    }
-                }
-                Ok(())
+                // One native SendInput call per event, not a paired batch:
+                // a failed key-up is recorded and retried by Sink::release.
+                self.emit_text_with(value, |unit, direction| {
+                    let flags = KEYEVENTF_UNICODE
+                        | if direction == Direction::Up {
+                            KEYEVENTF_KEYUP
+                        } else {
+                            0
+                        };
+                    send(&[key_event(0, unit, flags)])
+                })
             }
             Action::ReleaseAll => Err(()), // Executor invokes release() instead.
         }
@@ -233,6 +279,17 @@ impl Sink for NativeInput {
                 ok = false;
             }
         }
+        // KEYEVENTF_UNICODE is not a layout-invariant Key and therefore is
+        // absent from the Executor's held-key set. Its pending native up must
+        // participate in the same terminal cleanup outcome, including Drop.
+        if self
+            .retry_text_key_up(|unit| {
+                send(&[key_event(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])
+            })
+            .is_err()
+        {
+            ok = false;
+        }
         if ok {
             Ok(())
         } else {
@@ -243,7 +300,232 @@ impl Sink for NativeInput {
 
 #[cfg(test)]
 mod tests {
-    use super::exact_default_name;
+    use super::{exact_default_name, Direction, NativeInput};
+
+    #[test]
+    fn failed_text_key_up_is_not_erased_by_generic_cleanup() {
+        let mut input = NativeInput::default();
+        let mut sent = Vec::new();
+        let result = input.emit_text_with("A", |unit, direction| {
+            sent.push((unit, direction));
+            if direction == Direction::Up {
+                Err(())
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result, Err(()));
+        assert_eq!(
+            sent,
+            vec![
+                (u16::from(b'A'), Direction::Down),
+                (u16::from(b'A'), Direction::Up)
+            ]
+        );
+        assert_eq!(input.pending_text_key_up, Some(u16::from(b'A')));
+        assert_eq!(
+            input.emit_text_with("B", |_, _| panic!("cannot overwrite cleanup debt")),
+            Err(())
+        );
+
+        assert_eq!(input.retry_text_key_up(|_| Err(())), Err(()));
+        assert_eq!(input.pending_text_key_up, Some(u16::from(b'A')));
+        let mut retries = 0;
+        assert_eq!(
+            input.retry_text_key_up(|unit| {
+                assert_eq!(unit, u16::from(b'A'));
+                retries += 1;
+                Ok(())
+            }),
+            Ok(())
+        );
+        assert_eq!(input.pending_text_key_up, None);
+        assert_eq!(
+            input.retry_text_key_up(|_| panic!("no double release")),
+            Ok(())
+        );
+        assert_eq!(retries, 1);
+    }
+
+    #[test]
+    fn uncertain_text_down_failure_retains_conservative_release_debt() {
+        let mut input = NativeInput::default();
+        assert_eq!(
+            input.emit_text_with("x", |_, direction| {
+                assert_eq!(direction, Direction::Down);
+                Err(())
+            }),
+            Err(())
+        );
+        assert_eq!(input.pending_text_key_up, Some(u16::from(b'x')));
+        assert_eq!(
+            input.retry_text_key_up(|unit| {
+                assert_eq!(unit, u16::from(b'x'));
+                Ok(())
+            }),
+            Ok(())
+        );
+        assert_eq!(input.pending_text_key_up, None);
+    }
+
+    #[test]
+    fn unicode_surrogate_pairs_are_released_per_code_unit_without_lost_debt() {
+        let units: Vec<u16> = "😀".encode_utf16().collect();
+        assert_eq!(units.len(), 2);
+        let mut input = NativeInput::default();
+        let mut events = Vec::new();
+        assert_eq!(
+            input.emit_text_with("😀", |unit, direction| {
+                events.push((unit, direction));
+                if unit == units[1] && direction == Direction::Up {
+                    Err(())
+                } else {
+                    Ok(())
+                }
+            }),
+            Err(())
+        );
+        assert_eq!(
+            events,
+            vec![
+                (units[0], Direction::Down),
+                (units[0], Direction::Up),
+                (units[1], Direction::Down),
+                (units[1], Direction::Up)
+            ]
+        );
+        assert_eq!(input.pending_text_key_up, Some(units[1]));
+        assert_eq!(
+            input.retry_text_key_up(|unit| {
+                assert_eq!(unit, units[1]);
+                Ok(())
+            }),
+            Ok(())
+        );
+        assert_eq!(
+            input.emit_text_with("ok", |_, _| Ok(())),
+            Ok(()),
+            "recovered native state may emit only when its caller authorizes"
+        );
+        assert_eq!(input.pending_text_key_up, None);
+    }
+
+    #[test]
+    fn pending_unicode_debt_blocks_all_native_emission_until_release() {
+        use crate::executor::Sink;
+        use crate::policy::{Action, Button, Key};
+
+        let mut input = NativeInput {
+            pending_text_key_up: Some(0xD83D),
+        };
+        // The early debt guard must reject before entering any native
+        // SendInput branch. These negative calls have no physical effects.
+        for action in [
+            Action::Text("new".into()),
+            Action::Move { dx: 1.0, dy: 0.0 },
+            Action::Scroll { dx: 0.0, dy: 1.0 },
+            Action::Key {
+                key: Key::Enter,
+                direction: Direction::Down,
+            },
+            Action::Button {
+                button: Button::Left,
+                direction: Direction::Down,
+            },
+            Action::ReleaseAll,
+        ] {
+            assert_eq!(input.emit(&action), Err(()));
+            assert_eq!(input.pending_text_key_up, Some(0xD83D));
+        }
+    }
+
+    #[test]
+    fn executor_drop_retries_unicode_release_without_native_input() {
+        use crate::executor::{ExecutionError, Executor, Sink};
+        use crate::policy::{Action, Button, InputFrame, Key};
+        use std::cell::{Cell, RefCell};
+        use std::collections::BTreeSet;
+        use std::rc::Rc;
+
+        struct PureSink {
+            native: NativeInput,
+            release_fails: Rc<Cell<bool>>,
+            release_attempts: Rc<RefCell<Vec<u16>>>,
+        }
+        impl Sink for PureSink {
+            fn emit(&mut self, action: &Action) -> Result<(), ()> {
+                if let Action::Text(text) = action {
+                    self.native.emit_text_with(text, |_, direction| {
+                        if direction == Direction::Up {
+                            Err(()) // Simulate uncertain native SendInput key-up.
+                        } else {
+                            Ok(())
+                        }
+                    })
+                } else {
+                    Err(())
+                }
+            }
+
+            fn release(&mut self, _: &BTreeSet<Key>, _: &BTreeSet<Button>) -> Result<(), ()> {
+                self.native.retry_text_key_up(|unit| {
+                    self.release_attempts.borrow_mut().push(unit);
+                    if self.release_fails.get() {
+                        Err(())
+                    } else {
+                        Ok(())
+                    }
+                })
+            }
+        }
+
+        let release_fails = Rc::new(Cell::new(true));
+        let release_attempts = Rc::new(RefCell::new(Vec::new()));
+        {
+            let mut executor = Executor::new(
+                PureSink {
+                    native: NativeInput::default(),
+                    release_fails: Rc::clone(&release_fails),
+                    release_attempts: Rc::clone(&release_attempts),
+                },
+                "authorized-session-0001".to_owned(),
+            );
+            let frame = InputFrame {
+                session_id: "authorized-session-0001".to_owned(),
+                sequence: 1,
+                timestamp_ms: 10_000,
+                encoded_bytes: 100,
+                action: Action::Text("z".to_owned()),
+            };
+            assert_eq!(
+                executor.dispatch_authorized(&frame, 10_000),
+                Err(ExecutionError::CleanupFailed)
+            );
+            assert!(executor.cleanup_failed());
+            assert_eq!(release_attempts.borrow().as_slice(), &[u16::from(b'z')]);
+            release_fails.set(false); // Simulate desktop recovery before Drop.
+        }
+        assert_eq!(
+            release_attempts.borrow().as_slice(),
+            &[u16::from(b'z'), u16::from(b'z')],
+            "Executor::drop must retry the pending Unicode up once"
+        );
+    }
+
+    #[test]
+    fn successful_text_key_ups_leave_no_pending_native_debt() {
+        let mut input = NativeInput::default();
+        let mut sent = 0;
+        input
+            .emit_text_with("aé", |_, _| {
+                sent += 1;
+                Ok(())
+            })
+            .expect("pure test callbacks only, no SendInput");
+        assert_eq!(sent, 4);
+        assert_eq!(input.pending_text_key_up, None);
+        assert_eq!(input.retry_text_key_up(|_| panic!("not pending")), Ok(()));
+    }
 
     #[test]
     fn desktop_name_must_be_exactly_terminated_and_byte_bounded() {
