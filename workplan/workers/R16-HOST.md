@@ -1,0 +1,33 @@
+# R16-HOST — native transport evidence audit and Rust crypto substrate
+
+**Scope:** Worker `deployment-child-d3512cb11b4743bcf9f02cb2634fbb50`, instance `web-child-d3512cb11b4743bcf9f02cb2634fbb50`, lifecycleEpoch `01768e76-989f-4a61-a7bb-d977887a3c27`. Zoomouse rootIndex13, `github.com/electrocicla/zoomouse`, branch `main`. Starting published HEAD `662f53a5a2e7` (origin/main 0 ahead/0 behind). Five inherited dirty files strictly untouched: `.gitignore`, root `package.json`, `pnpm-lock.yaml`, `workplan/workers/R6-WIN.md`, `workplan/workers/R13-ANDROID.md`. No child agent.
+
+## Verified native-vs-fixture evidence
+
+- Read `crates/host/src/{pairing,channel_binding,admission,ingress,boundary,pairing_tcp}.rs`, `crates/host/Cargo.toml`, `apps/windows/src-tauri/{Cargo.toml,src/lib.rs}`, Android `SecureLanModule.kt` (the latter two READ ONLY).
+- The Windows Tauri entrypoint instantiates `LocalHostState<DisabledInput>`, exposes only `host_status` and `emergency_stop`; no DTLS/SCTP peer, raw association exporter, both certificate fingerprints, native stream/generation observation, interface/firewall provenance, or native consent callback. Android `SecureLanModule` always rejects opens; it is not a native DTLS producer. `pairing_tcp.rs` remains a crate-private **plaintext, unstarted test substrate**, not a production LAN service. `channel_binding.rs` uses **caller-populated test observations**, not transport-authenticated native receipts.
+- A successful Ed25519 pairing signature or `ChannelProofChallenge::finish` does **not** imply a real channel. It returns `Result<(), ChannelProofError>`; the privileged `VerifiedChannelEvidence` construction deliberately does not exist in production. Supplying a constructor now from this caller-populated struct would fabricate a trust path. No signed transcript/certificate/exporter was invented; no listener, remote IPC, OS grant, or native input enabled.
+- The 245-byte proof protocol intentionally omits host-local `association_generation` from its signed hash because Android cannot know a host-native epoch. Host `finish()` separately re-observes and compares the full association including generation, but this is only effective once a real native observer exists; do not silently change wire format to fix a non-existent adapter.
+
+## Scoped source delivery
+
+- `crates/host/src/pairing.rs`: Phone key proof now uses `ed25519-dalek` **`verify_strict`** instead of permissive `Verifier::verify`. One-use pending challenge, verified-candidate and enrolled-key records retain native monotonic issuance instants. Proof and OS-local decision reject clock reversal with explicit `PairingError::ClockRegressed` **after consuming the attempt**. An approved enrollment does not authorize a caller-supplied timestamp before its actual local decision; existing expiration and revocation still apply. No new dependency.
+- Three adversarial Rust tests: signed proof clock regression burns nonce and rejects replay; local-approval regression consumes candidate; future-dated approved enrollment cannot authorize past input, expires at boundary and cannot resurrect after revoke.
+- `crates/host/README.md`: explicitly documents the one-use strict crypto/clock behavior and reaffirms no native permission is provided.
+
+## Trusted producer integration contract (NOT IMPLEMENTED)
+
+A reviewed native WebRTC/DTLS/SCTP backend must supply a single *live* established association handle, native CSPRNG exporter (domain-separated, 32 bytes), host and peer certificate SHA-256 fingerprints **from the actual connection**, SCTP stream ID, strictly increasing nonzero backend association generation, plus a verified pinned host Ed25519 identity and enrolled phone Ed25519 key. Neither JSON, QR, signaling, renderer nor remote messages may provide authoritative values. Challenge and completion must each re-observe that exact handle; any mismatch/closure, OS lock/console switch, abort, replay or source change revokes, and key/button cleanup is attempted. Only after successful strict Ed25519 proof **and** verified local enrollment may a separate short-lived native Windows approval UI be considered. An independently sourced OS callback must bind device+session+binding+generation to the current interactive user and explicitly grant; no automatic input or renderer approval. Verify Android's own exporter and pinned host from its actual connection. Without a real native producer, these interfaces remain blocked.
+
+## QA and publication receipts
+
+- Initial `cargo fmt --manifest-path crates/host/Cargo.toml --check` request was rejected **before command start** by Agents Global repo-wide workspace reservation while Android worker owned `SecureLanPairingProof.kt` (no run ID, no exit).
+- `cargo fmt --manifest-path crates/host/Cargo.toml --check` — `termrun_7e4ea523803a47dfb4937b6e2202d6d9`, **EXIT 1** due exclusively to three rustfmt line-wrapping differences in new test assertions.
+- `cargo fmt --manifest-path crates/host/Cargo.toml` — `termrun_e9053162514d4cb7b4ec2a3805d4ab7d`, **EXIT 0**, edits scoped Rust crate. Subsequent check request denied **before start** while Android worker held `SecureLanPairingProofTest.kt` (no run ID).
+- `cargo fmt --manifest-path crates/host/Cargo.toml --check` — `termrun_4d7987f5e557430aaeb43bfd31e5c820`, **EXIT 0**.
+- `cargo check --manifest-path crates/host/Cargo.toml` — `termrun_64b78429adad40859d5a985630ff306c`, **EXIT 0**.
+- `cargo test --manifest-path crates/host/Cargo.toml` — `termrun_e882b7cca4a94784b73524611e3feb18`, **EXIT 0**: 71 unit tests (all pass) and 1 compile-fail doctest (pass); three new rollback/nonce/authorization tests included.
+- `cargo clippy --manifest-path crates/host/Cargo.toml --all-targets -- -D warnings` — `termrun_c6bb2baae36648369aa9e769d27a93f4`, **EXIT 0**.
+- Validation performed through governed terminal `agent-term-1794585925539-6`, `I:\\Zoomouse`, after Android peer explicitly released claims; no other workspace mutations during tests. Commit/push receipt: **PENDING**.
+
+**Acceptance:** Source-only cryptographic precondition improvement. No native authenticated LAN, OS-local consent, M1 physical A01–A17, input, EXE/APK or production readiness demonstrated.

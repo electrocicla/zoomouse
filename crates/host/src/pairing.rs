@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 
 use crate::boundary::DesktopContext;
@@ -23,6 +23,7 @@ pub enum PairingError {
     Capacity,
     UnknownOrUsedChallenge,
     Expired,
+    ClockRegressed,
     WrongSource,
     InvalidSignature,
     LocalConsentRequired,
@@ -55,6 +56,7 @@ pub struct HostChallenge {
 struct PendingChallenge {
     hello: PhoneHello,
     source: PrivateLanEndpoint,
+    issued_at: Instant,
     host_nonce: [u8; 32],
     expires_at: Instant,
 }
@@ -63,6 +65,7 @@ struct PendingChallenge {
 struct VerifiedCandidate {
     public_key: [u8; 32],
     device_id: String,
+    issued_at: Instant,
     expires_at: Instant,
 }
 
@@ -70,6 +73,7 @@ struct VerifiedCandidate {
 struct Enrollment {
     public_key: [u8; 32],
     windows_user_session_id: String,
+    issued_at: Instant,
     expires_at: Instant,
     generation: u64,
 }
@@ -204,6 +208,7 @@ impl PairingRegistry {
             PendingChallenge {
                 hello,
                 source,
+                issued_at: now,
                 host_nonce,
                 expires_at,
             },
@@ -231,6 +236,9 @@ impl PairingRegistry {
             .outstanding
             .remove(&request_id)
             .ok_or(PairingError::UnknownOrUsedChallenge)?;
+        if now < challenge.issued_at {
+            return Err(PairingError::ClockRegressed);
+        }
         if now >= challenge.expires_at {
             return Err(PairingError::Expired);
         }
@@ -248,7 +256,7 @@ impl PairingRegistry {
             challenge.source,
         );
         public_key
-            .verify(&bytes, &Signature::from_bytes(&signature))
+            .verify_strict(&bytes, &Signature::from_bytes(&signature))
             .map_err(|_| PairingError::InvalidSignature)?;
         let view = LocalPairingRequest {
             request_id,
@@ -260,6 +268,7 @@ impl PairingRegistry {
             VerifiedCandidate {
                 public_key: challenge.hello.public_key,
                 device_id: view.device_id.clone(),
+                issued_at: now,
                 expires_at: now
                     .checked_add(CHALLENGE_TTL)
                     .ok_or(PairingError::Expired)?,
@@ -283,6 +292,9 @@ impl PairingRegistry {
             .awaiting_local
             .remove(&request_id)
             .ok_or(PairingError::UnknownOrUsedChallenge)?;
+        if now < candidate.issued_at {
+            return Err(PairingError::ClockRegressed);
+        }
         if now >= candidate.expires_at || !desktop.can_receive_input() {
             return Err(PairingError::LocalConsentRequired);
         }
@@ -301,6 +313,7 @@ impl PairingRegistry {
             Enrollment {
                 public_key: candidate.public_key,
                 windows_user_session_id: desktop.user_session_id().to_owned(),
+                issued_at: now,
                 expires_at,
                 generation: self.generation,
             },
@@ -324,6 +337,7 @@ impl PairingRegistry {
                 && grant.generation <= self.generation
                 && grant.windows_user_session_id == desktop.user_session_id()
                 && desktop.can_receive_input()
+                && now >= grant.issued_at
                 && now < grant.expires_at
         })
     }
@@ -347,6 +361,7 @@ impl PairingRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::Verifier;
     use std::net::{IpAddr, Ipv4Addr};
 
     fn source(octet: u8) -> PrivateLanEndpoint {
@@ -747,6 +762,127 @@ mod tests {
             &phone(15).1.public_key,
             &desktop(false),
             now
+        ));
+    }
+
+    #[test]
+    fn clock_regression_burns_signed_proof_without_enrollment_or_replay() {
+        let now = Instant::now();
+        let earlier = now - Duration::from_nanos(1);
+        let mut registry = PairingRegistry::new().expect("host CSPRNG");
+        let (signer, hello) = phone(17);
+        let challenge = registry
+            .begin(source(5), hello.clone(), now)
+            .expect("challenge");
+        let signature = signed_proof(
+            &registry,
+            &challenge,
+            &signer,
+            &hello.client_nonce,
+            source(5),
+        );
+        assert_eq!(
+            registry.prove(challenge.request_id, signature, source(5), earlier),
+            Err(PairingError::ClockRegressed)
+        );
+        assert_eq!(
+            registry.prove(challenge.request_id, signature, source(5), now),
+            Err(PairingError::UnknownOrUsedChallenge)
+        );
+        assert_eq!(registry.enrolled_device_count(), 0);
+    }
+
+    #[test]
+    fn clock_regression_burns_os_local_pairing_decision_and_cannot_retry() {
+        let now = Instant::now();
+        let proven_at = now + Duration::from_secs(1);
+        let mut registry = PairingRegistry::new().expect("host CSPRNG");
+        let (signer, hello) = phone(18);
+        let challenge = registry
+            .begin(source(5), hello.clone(), now)
+            .expect("challenge");
+        let signature = signed_proof(
+            &registry,
+            &challenge,
+            &signer,
+            &hello.client_nonce,
+            source(5),
+        );
+        let request = registry
+            .prove(challenge.request_id, signature, source(5), proven_at)
+            .expect("key-possession proof");
+        assert_eq!(
+            registry.decide_locally(
+                request.request_id,
+                LocalDecision::Approve,
+                &desktop(false),
+                now
+            ),
+            Err(PairingError::ClockRegressed)
+        );
+        assert_eq!(
+            registry.decide_locally(
+                request.request_id,
+                LocalDecision::Approve,
+                &desktop(false),
+                proven_at
+            ),
+            Err(PairingError::UnknownOrUsedChallenge)
+        );
+        assert_eq!(registry.enrolled_device_count(), 0);
+    }
+
+    #[test]
+    fn future_dated_local_enrollment_never_authorizes_past_frames() {
+        let now = Instant::now();
+        let grant_at = now + Duration::from_millis(100);
+        let mut registry = PairingRegistry::new().expect("host CSPRNG");
+        let (signer, hello) = phone(19);
+        let challenge = registry
+            .begin(source(5), hello.clone(), now)
+            .expect("challenge");
+        let signature = signed_proof(
+            &registry,
+            &challenge,
+            &signer,
+            &hello.client_nonce,
+            source(5),
+        );
+        let request = registry
+            .prove(challenge.request_id, signature, source(5), now)
+            .expect("key-possession proof");
+        registry
+            .decide_locally(
+                request.request_id,
+                LocalDecision::Approve,
+                &desktop(false),
+                grant_at,
+            )
+            .expect("trusted local fixture");
+        assert!(!registry.has_local_enrollment(
+            &request.device_id,
+            &hello.public_key,
+            &desktop(false),
+            now
+        ));
+        assert!(registry.has_local_enrollment(
+            &request.device_id,
+            &hello.public_key,
+            &desktop(false),
+            grant_at
+        ));
+        assert!(!registry.has_local_enrollment(
+            &request.device_id,
+            &hello.public_key,
+            &desktop(false),
+            grant_at + MAX_LOCAL_ENROLLMENT
+        ));
+        registry.revoke(&request.device_id);
+        assert!(!registry.has_local_enrollment(
+            &request.device_id,
+            &hello.public_key,
+            &desktop(false),
+            grant_at
         ));
     }
 
