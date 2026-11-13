@@ -14,6 +14,9 @@ import com.facebook.react.bridge.ReactMethod
 class SecureLanModule(context: ReactApplicationContext) :
     ReactContextBaseJavaModule(context), LifecycleEventListener {
     private val fence = SecureLanAttemptFence()
+    // Kotlin-only pairing proof precondition. No JS path can start it without
+    // a future audited native encrypted-connection observer.
+    private val pairingProof = SecureLanPairingProof()
 
     init {
         context.addLifecycleEventListener(this)
@@ -26,14 +29,17 @@ class SecureLanModule(context: ReactApplicationContext) :
     }
 
     override fun onHostPause() {
+        pairingProof.abortAll()
         fence.onBackground()
     }
 
     override fun onHostDestroy() {
+        pairingProof.abortAll()
         fence.onDestroyed()
     }
 
     override fun invalidate() {
+        pairingProof.abortAll()
         fence.onDestroyed()
         reactApplicationContext.removeLifecycleEventListener(this)
         super.invalidate()
@@ -60,6 +66,7 @@ class SecureLanModule(context: ReactApplicationContext) :
         if (invalid != null) {
             promise.reject(invalid, "Invalid native attempt identifier.")
         } else {
+            pairingProof.abortAttempt(attemptId.toLong())
             // Safe for repeated close: the deny-only module creates no resources.
             promise.resolve(null)
         }
