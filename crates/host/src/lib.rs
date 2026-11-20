@@ -20,6 +20,9 @@ pub mod lan;
 pub mod pairing;
 #[allow(dead_code)]
 mod private_bind;
+// TLS1.3 association codec/proof only: no TLS producer, socket or input authority.
+#[allow(dead_code)]
+mod tls_association;
 // No Tauri/runtime entrypoint: plaintext pairing is intentionally inaccessible.
 #[allow(dead_code)]
 mod pairing_tcp;
