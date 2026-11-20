@@ -65,6 +65,8 @@ describe("Android Kotlin secure LAN bridge (deny-only until native DTLS exists)"
     "E_NATIVE_CHANNEL_STALE_ATTEMPT",
     "E_NATIVE_CHANNEL_INVALID_ATTEMPT",
     "E_NATIVE_CHANNEL_INVALID_PORT",
+    "E_NATIVE_CHANNEL_INVALID_HOST_PIN",
+    "E_NATIVE_CHANNEL_NO_LOCAL_LAN_INTERFACE",
   ])("treats Kotlin %s as explicit denial, never transport or input authority", async code => {
     const closed: number[] = [];
     const coordinator = new LanAttemptCoordinator(createAndroidNativeLanPort({

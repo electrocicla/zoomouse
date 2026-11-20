@@ -13,7 +13,7 @@ import com.facebook.react.bridge.ReactMethod
  */
 class SecureLanModule(context: ReactApplicationContext) :
     ReactContextBaseJavaModule(context), LifecycleEventListener {
-    private val fence = SecureLanAttemptFence()
+    private val fence = SecureLanNativeOpenGuard()
     // Kotlin-only pairing proof precondition. No JS path can start it without
     // a future audited native encrypted-connection observer.
     private val pairingProof = SecureLanPairingProof()
@@ -53,11 +53,12 @@ class SecureLanModule(context: ReactApplicationContext) :
         pinnedHostPublicKeyHex: String?,
         promise: Promise,
     ) {
-        // Ignore all untrusted host/QR arguments. Only an independently
-        // authenticated native peer producer may ever authorize a channel.
+        // QR host/port/pin are untrusted hints. Consume the attempt before
+        // native OS-interface preflight; neither a match nor a QR pin grants
+        // cryptographic peer identity, a live channel or OS-local consent.
         // This implementation ALWAYS rejects, including after foreground.
-        val denial = fence.rejectOpen(attemptId, port)
-        promise.reject(denial, "No authenticated Android DTLS/SCTP channel or native consent proof is installed.")
+        val denial = fence.rejectOpen(attemptId, ipv4, port, pinnedHostPublicKeyHex)
+        promise.reject(denial, "No authenticated Android TLS/DTLS peer or Windows consent is installed.")
     }
 
     @ReactMethod
