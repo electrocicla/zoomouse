@@ -16,7 +16,10 @@ pub mod input;
 // No production encrypted DataChannel adapter: only crate-private safety checks.
 mod ingress;
 pub mod lan;
+// Bind-only native OS observation; no UDP read/write, encrypted producer or Tauri entrypoint.
 pub mod pairing;
+#[allow(dead_code)]
+mod private_bind;
 // No Tauri/runtime entrypoint: plaintext pairing is intentionally inaccessible.
 #[allow(dead_code)]
 mod pairing_tcp;
