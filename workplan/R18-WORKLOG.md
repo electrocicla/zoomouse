@@ -1,0 +1,8 @@
+# Zoomouse R18 — evidence worklog
+
+## 2026-11-20 ~14:19–14:22 Chile — admitted, investigated, planned
+- First MK059 tool notcode_get_agent_instructions; workspace_scope root13 Zoomouse, select/reverify; independently connected task deployment-child-0541cc814a8798f2cccd8f9bc57c4546 / instance web-child-0541cc814a8798f2cccd8f9bc57c4546, lifecycle epoch 92db6cba-3603-43ce-9ed7-b916452fd2f1, native Agents Global session. Parent task zoomouse-r17-review-successor-20261120-1412 only coordination.
+- Fresh Git main origin/main HEAD aed1c261518695eb611c5d1c42c0ea7b1386917c, ahead0 behind0, precisely 5 unrelated dirty paths protected: .gitignore, package.json, pnpm-lock.yaml, workplan/workers/R6-WIN.md, workplan/workers/R13-ANDROID.md. No overlaps observed at initial connect; must recheck before workers/Git.
+- Read R17 three reports/worker records and Rust host core manifest/authority graph; Android manifest/platform Gradle/secure pairing/preflight; Tauri native shell/desktop observer; protocol QR framing. AGENTS.md and .github/copilot-instructions.md not present at root; no fabricated repo rules.
+- Chose TLS1.3 private TCP with Rust rustls and Android JSSE as target, but rustls dependency, certificate issuance/host key protection, production INTERNET permission and official Android SDK installation remain explicit owner gates. Code-only native framing/proof or consent work may proceed without those changes. No claims of native encrypted transport, Android Kotlin success, APK or EXE.
+- R18 new plan/tasks/worklog authored before native source modifications; future phases and exact proof appended only after execution. Preserve R17 docs immutable.
