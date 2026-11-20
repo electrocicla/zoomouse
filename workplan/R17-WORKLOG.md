@@ -1,0 +1,10 @@
+# Zoomouse R17 — factual worklog
+
+## 2026-11-20 11:42–11:44 CLST — independent admission and source investigation
+- First MK059 action notcode_get_agent_instructions; own host-injected task deployment-child-b07ba13474c507da4c1a7cd20669602c, instance web-child-b07ba13474c507da4c1a7cd20669602c, epoch f480261c-a682-4172-b711-75e4b4ed4c8e. Selected and reverified rootIndex13 Zoomouse before connect. Own Agents Global connectedAt=2026-11-20T14:42:16.555Z. Parent task only context, never impersonated.
+- Canonical github.com/electrocicla/zoomouse, branch main, origin/main baseline 765c165db92ea21464440b8b39ca3850eb055811, 0 ahead/0 behind. Exactly five foreign dirty/untracked files protected: .gitignore; root package.json; pnpm-lock.yaml; workplan/workers/R6-WIN.md; workplan/workers/R13-ANDROID.md. No other Zoomouse live actor/claim on admission. R16 previous session completed/published.
+- Actual code read: crates/host/{Cargo.toml,src/{lib,lan,channel_binding,admission,ingress,boundary}.rs}, apps/mobile/android/app/{src/main/AndroidManifest.xml,src/main/java/com/zoomouse/mobile/SecureLanModule.kt}, apps/mobile/src/domain/android-native-lan.ts, apps/windows/src-tauri/{Cargo.toml,src/lib.rs}; R16 docs and workplan rules. Findings: host Rust ed25519-dalek/sha2/getrandom but no native encrypted transport; caller-supplied crypto observations prove no association; Kotlin bridge rejects all opens, no INTERNET; Tauri has DisabledInput, no native consent, Android Gradle native tests unexecuted from R16. Source and native execution explicitly distinguished.
+- New R17 docs planned before native source changes. Child preflight, disjoint scope, native dependency decisions and own governed source/test/commit receipts will be appended here only after observed.
+
+## Current gate
+No native TLS/DTLS crypto provider proven, no independent host/Android channel or consent. Android wrapper/SDK missing per historical preflight (fresh preflight pending). No native APK, EXE, physical A01–A17 or M2 streaming acceptance.
