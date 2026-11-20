@@ -1,10 +1,12 @@
 //! User-session desktop shell. No listener, service, elevation or capture.
 mod desktop_observer;
+mod native_local_approval;
 
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use desktop_observer::{observe, DesktopObservation};
+use native_local_approval::NativeTrayApproval;
 
 use serde::Serialize;
 use tauri::image::Image;
@@ -31,6 +33,7 @@ struct LocalHostState<B: InputBackend> {
     session: HostSession<B>,
     last_release: ReleaseOutcome,
     last_desktop: DesktopObservation,
+    native_approval: NativeTrayApproval,
 }
 
 impl<B: InputBackend> LocalHostState<B> {
@@ -39,10 +42,13 @@ impl<B: InputBackend> LocalHostState<B> {
             session: HostSession::new(backend),
             last_release: ReleaseOutcome::NotAttempted,
             last_desktop: DesktopObservation::Unavailable,
+            native_approval: NativeTrayApproval::new(),
         }
     }
 
     fn stop(&mut self) -> Result<(), HostError> {
+        // A stop destroys pending local human decisions even if release fails.
+        self.native_approval.revoke();
         // Record failures even when the UI cannot receive an IPC reply.
         let result = self.session.revoke();
         self.last_release = if result.is_ok() {
@@ -58,6 +64,8 @@ impl<B: InputBackend> LocalHostState<B> {
     // the interactive desktop is observed again, without restoring authority.
     // Repeated unavailable samples must not erase or flood failed cleanup.
     fn observe_desktop(&mut self, desktop: DesktopObservation) {
+        self.native_approval
+            .observe_desktop(desktop, Instant::now());
         let desktop_restored = self.last_desktop == DesktopObservation::Unavailable
             && desktop == DesktopObservation::InteractiveDefault;
         self.last_desktop = desktop;
@@ -187,10 +195,19 @@ pub fn run() -> tauri::Result<()> {
         })
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Open Zoomouse", true, None::<&str>)?;
+            // The OS-native approval menu stays disabled until a reviewed
+            // TLS backend delivers an authenticated, enrolled device request.
+            let approve = MenuItem::with_id(
+                app,
+                "approve_native",
+                "Approve verified phone (encrypted channel required)",
+                false,
+                None::<&str>,
+            )?;
             let revoke =
                 MenuItem::with_id(app, "revoke", "Emergency stop / revoke", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Zoomouse", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &revoke, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &approve, &revoke, &quit])?;
 
             TrayIconBuilder::new()
                 .icon(tray_icon())
@@ -201,6 +218,23 @@ pub fn run() -> tauri::Result<()> {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                        }
+                    } else if event.id() == "approve_native" {
+                        // Native OS tray callback, never renderer-origin IPC.
+                        // A local click is not an input grant.
+                        let desktop = observe().unwrap_or(DesktopObservation::Unavailable);
+                        let state = app.state::<LocalHost>();
+                        let mut host = state
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        // A menu event cannot create a verified request.
+                        if !host.native_approval.has_pending_verified_request()
+                            || host
+                                .native_approval
+                                .approve_from_native_tray(desktop, Instant::now())
+                                .is_err()
+                        {
+                            host.native_approval.revoke();
                         }
                     } else if event.id() == "revoke" {
                         // Never discard a native release failure while hidden in the tray.

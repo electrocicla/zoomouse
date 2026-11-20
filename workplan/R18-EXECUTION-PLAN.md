@@ -29,3 +29,6 @@ Attacker LAN MITM (certificate substitution, forged QR/mDNS), public/VPN/nonpriv
 
 ## Acceptance (do not aggregate incomplete evidence)
 A1 real native interoperable TLS host↔Android protected association and negative peer tests; A2 persistent independent enrolled phone + revocation; A3 OS-local interactive Win11 consent bound to session; A4 native race/lock/reconnect/revoke/partial input cleanup; A5 official Kotlin Gradle/SDK test/build; A6 actual EXE/APK & physical A01–A17; A7 WGC/D3D11/MediaFoundation H264 Android decode/cursor-follow. ALL initially BLOCKED, each advances ONLY with corresponding cryptographic/native/executable receipts. Loopback native component crypto tests do not meet Android physical E2E. Validate Rust fmt/check/test/clippy, Windows native tests if possible, TS typecheck/lint/Vitest and official Android readiness; record exact runIDs and exits; exact-file stage/commit/push; verify main 0/0 and five protected dirties.
+
+## R18 implementation disposition
+See R18-WORKLOG.md for exact Rust/Android/Windows runIDs and source commits. Host TLS provider, signed/stable credential storage, Android release INTERNET permission and official Gradle/SDK remain owner decisions, not silently installed. No native end-to-end channel receipt or security authority exists. All A1-A7 blocked; no R19 successor without new owner request.
