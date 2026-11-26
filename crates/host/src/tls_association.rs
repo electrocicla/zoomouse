@@ -9,7 +9,6 @@
 //! Returning Ok from a phone signature check must never unlock HostAdmission.
 
 use std::net::SocketAddrV4;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use ed25519_dalek::{Signature, VerifyingKey};
@@ -24,7 +23,8 @@ pub(crate) const MAX_WIRE_BYTES: usize = MAX_FRAME_LEN + 2;
 pub(crate) const PROOF_TTL: Duration = Duration::from_secs(20);
 const CHALLENGE_LEN: usize = 118;
 const RESPONSE_LEN: usize = 98;
-static NEXT_EPOCH: AtomicU64 = AtomicU64::new(0);
+// Android's positive Long is the narrower side of the frozen u64 wire ABI.
+const MAX_EPOCH: u64 = i64::MAX as u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AssociationError {
@@ -32,6 +32,9 @@ pub(crate) enum AssociationError {
     UnenrolledPhone,
     EntropyUnavailable,
     EpochExhausted,
+    EpochStateUnavailable,
+    EpochStateChanged,
+    EpochCommitUncertain,
     InvalidFrame,
     TruncatedFrame,
     OversizeFrame,
@@ -159,14 +162,53 @@ impl FrameDecoder {
     }
 }
 
-/// A process-monotonic association epoch. An attempt consumes its epoch even
-/// when the proof fails. Restart resets the epoch; fresh OS CSPRNG host nonce
-/// and OS-native socket identity are mandatory for cross-restart replay safety.
-fn next_epoch() -> Result<u64, AssociationError> {
-    NEXT_EPOCH
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
-        .map(|old| old + 1)
-        .map_err(|_| AssociationError::EpochExhausted)
+/// A bounded snapshot of one certificate's global high-water and the selected
+/// locally approved phone enrollment. The epoch is per certificate, NOT per
+/// phone. A real store must read both from the same protected transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EpochState {
+    leaf_cert_sha256: [u8; 32],
+    high_water: u64,
+    enrollment: LocalEnrollment,
+}
+
+/// Contract for a future owner-approved protected store. No production
+/// implementation or automatic initialization exists. A durable store must
+/// detect missing/corrupt/rolled-back state using independent protection.
+/// compare_and_commit must atomically compare the certificate high-water AND
+/// enrollment (including revocation/revision), persist the new high-water,
+/// and acknowledge only after durable commit. A conflict or uncertain outcome
+/// never permits an emitted challenge. Do not roll back or retry in this call.
+pub(crate) trait EpochStore {
+    fn load(
+        &mut self,
+        leaf: &[u8; 32],
+        enrolled_key: &[u8; 32],
+    ) -> Result<EpochState, AssociationError>;
+
+    fn compare_and_commit(
+        &mut self,
+        expected: &EpochState,
+        next: u64,
+    ) -> Result<(), AssociationError>;
+}
+
+fn reserve_epoch(
+    store: &mut impl EpochStore,
+    socket: &VerifiedTlsSocket,
+    enrollment: &LocalEnrollment,
+) -> Result<u64, AssociationError> {
+    let state = store.load(&socket.leaf_cert_sha256, &enrollment.verifying_key)?;
+    if state.leaf_cert_sha256 != socket.leaf_cert_sha256 || state.enrollment != *enrollment {
+        return Err(AssociationError::EpochStateChanged);
+    }
+    let next = state
+        .high_water
+        .checked_add(1)
+        .filter(|epoch| *epoch <= MAX_EPOCH)
+        .ok_or(AssociationError::EpochExhausted)?;
+    store.compare_and_commit(&state, next)?;
+    Ok(next)
 }
 
 fn private_ipv4(addr: SocketAddrV4) -> bool {
@@ -246,17 +288,20 @@ impl PendingPhoneProof {
     pub(crate) fn begin(
         socket: &VerifiedTlsSocket,
         enrollment: &LocalEnrollment,
+        store: &mut impl EpochStore,
         now: Instant,
     ) -> Result<(Self, Vec<u8>), AssociationError> {
         let verifier = validate_native(socket, enrollment)?;
         now.checked_add(PROOF_TTL)
             .ok_or(AssociationError::Expired)?;
-        let epoch = next_epoch()?;
         let mut nonce = [0u8; 32];
         getrandom(&mut nonce).map_err(|_| AssociationError::EntropyUnavailable)?;
         if !nonce.iter().any(|b| *b != 0) {
             return Err(AssociationError::EntropyUnavailable);
         }
+        // No challenge bytes are created or returned until the durable store
+        // confirms the atomic reservation. A lost acknowledgement burns the epoch.
+        let epoch = reserve_epoch(store, socket, enrollment)?;
         let challenge = challenge_payload(socket, enrollment, epoch, &nonce);
         let frame = encode_frame(&challenge)?;
         Ok((
@@ -330,23 +375,77 @@ mod tests {
     use ed25519_dalek::{Signer, SigningKey};
     use std::net::Ipv4Addr;
 
-    // Test-only fixtures cannot become production native TLS or OS enrollment.
-    fn fixtures() -> (VerifiedTlsSocket, LocalEnrollment, SigningKey) {
+    // This transactional model is fixture-only. It does not prove OS-level
+    // durable storage, rollback resistance, native TLS, or local enrollment.
+    #[derive(Default)]
+    struct FixtureStore {
+        state: Option<EpochState>,
+        revoke_at_commit: bool,
+        lose_ack: bool,
+    }
+
+    impl EpochStore for FixtureStore {
+        fn load(
+            &mut self,
+            leaf: &[u8; 32],
+            enrolled_key: &[u8; 32],
+        ) -> Result<EpochState, AssociationError> {
+            let state = self
+                .state
+                .as_ref()
+                .ok_or(AssociationError::EpochStateUnavailable)?;
+            if &state.leaf_cert_sha256 != leaf || &state.enrollment.verifying_key != enrolled_key {
+                return Err(AssociationError::EpochStateChanged);
+            }
+            Ok(state.clone())
+        }
+
+        fn compare_and_commit(
+            &mut self,
+            expected: &EpochState,
+            next: u64,
+        ) -> Result<(), AssociationError> {
+            let state = self
+                .state
+                .as_mut()
+                .ok_or(AssociationError::EpochStateUnavailable)?;
+            if self.revoke_at_commit {
+                state.enrollment.active = false;
+                state.enrollment.revision += 1;
+            }
+            if state != expected || next != state.high_water + 1 {
+                return Err(AssociationError::EpochStateChanged);
+            }
+            state.high_water = next;
+            if self.lose_ack {
+                return Err(AssociationError::EpochCommitUncertain);
+            }
+            Ok(())
+        }
+    }
+
+    fn fixtures() -> (VerifiedTlsSocket, LocalEnrollment, SigningKey, FixtureStore) {
         let signing = SigningKey::from_bytes(&[7u8; 32]);
-        (
-            VerifiedTlsSocket {
-                leaf_cert_sha256: [9; 32],
-                host: SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 10), 50111),
-                phone: SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 11), 49888),
-                socket_generation: 1,
-            },
-            LocalEnrollment {
-                verifying_key: signing.verifying_key().to_bytes(),
-                revision: 1,
-                active: true,
-            },
-            signing,
-        )
+        let socket = VerifiedTlsSocket {
+            leaf_cert_sha256: [9; 32],
+            host: SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 10), 50111),
+            phone: SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 11), 49888),
+            socket_generation: 1,
+        };
+        let enrollment = LocalEnrollment {
+            verifying_key: signing.verifying_key().to_bytes(),
+            revision: 1,
+            active: true,
+        };
+        let store = FixtureStore {
+            state: Some(EpochState {
+                leaf_cert_sha256: socket.leaf_cert_sha256,
+                high_water: 0,
+                enrollment: enrollment.clone(),
+            }),
+            ..FixtureStore::default()
+        };
+        (socket, enrollment, signing, store)
     }
 
     fn sign_response(frame: &[u8], phone: &SigningKey, nonce: [u8; 32]) -> Vec<u8> {
@@ -361,10 +460,10 @@ mod tests {
 
     #[test]
     fn strict_wire_layout_and_one_shot_proof_without_host_admission() {
-        let (socket, enrolled, phone) = fixtures();
+        let (socket, enrolled, phone, mut store) = fixtures();
         let now = Instant::now();
         let (mut pending, challenge) =
-            PendingPhoneProof::begin(&socket, &enrolled, now).expect("fixture");
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("fixture");
         assert_eq!(challenge.len(), 2 + CHALLENGE_LEN);
         let p = decode_frame(&challenge).expect("frame");
         assert_eq!((p[0], p[1]), (VERSION, CHALLENGE_TAG));
@@ -390,11 +489,11 @@ mod tests {
     }
 
     #[test]
-    fn process_epochs_increase_even_on_abandoned_proofs() {
-        let (socket, enrolled, _) = fixtures();
+    fn reserved_epochs_increase_even_on_abandoned_proofs() {
+        let (socket, enrolled, _, mut store) = fixtures();
         let now = Instant::now();
-        let (_, one) = PendingPhoneProof::begin(&socket, &enrolled, now).expect("one");
-        let (_, two) = PendingPhoneProof::begin(&socket, &enrolled, now).expect("two");
+        let (_, one) = PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("one");
+        let (_, two) = PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("two");
         let a = u64::from_be_bytes(one[4..12].try_into().expect("epoch"));
         let b = u64::from_be_bytes(two[4..12].try_into().expect("epoch"));
         assert!(a > 0 && b > a);
@@ -438,7 +537,7 @@ mod tests {
 
     #[test]
     fn deadline_and_clock_rollback_fail_closed_for_fragments_and_proof() {
-        let (socket, enrolled, phone) = fixtures();
+        let (socket, enrolled, phone, mut store) = fixtures();
         let now = Instant::now();
         let mut decoder = FrameDecoder::new(now);
         assert_eq!(
@@ -451,7 +550,7 @@ mod tests {
             Err(AssociationError::ClockRollback)
         );
         let (mut expired, frame) =
-            PendingPhoneProof::begin(&socket, &enrolled, now).expect("proof");
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("proof");
         let signed = sign_response(&frame, &phone, [4; 32]);
         assert_eq!(
             expired.finish(&signed, Some(&socket), Some(&enrolled), now + PROOF_TTL),
@@ -461,7 +560,8 @@ mod tests {
             expired.finish(&signed, Some(&socket), Some(&enrolled), now),
             Err(AssociationError::AlreadyConsumed)
         );
-        let (mut rollback, _) = PendingPhoneProof::begin(&socket, &enrolled, now).expect("proof");
+        let (mut rollback, _) =
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("proof");
         assert_eq!(
             rollback.finish(
                 &signed,
@@ -475,11 +575,11 @@ mod tests {
 
     #[test]
     fn wrong_key_client_nonce_and_malformed_proof_burn_pending_nonce() {
-        let (socket, enrolled, phone) = fixtures();
+        let (socket, enrolled, phone, mut store) = fixtures();
         let now = Instant::now();
         let wrong = SigningKey::from_bytes(&[8; 32]);
         let (mut pending, challenge) =
-            PendingPhoneProof::begin(&socket, &enrolled, now).expect("proof");
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("proof");
         let invalid = sign_response(&challenge, &wrong, [8; 32]);
         assert_eq!(
             pending.finish(&invalid, Some(&socket), Some(&enrolled), now),
@@ -499,14 +599,16 @@ mod tests {
             vec![0, 1, 99],
             encode_frame(&[VERSION, PROOF_TAG]).expect("fixture"),
         ] {
-            let (mut p, _) = PendingPhoneProof::begin(&socket, &enrolled, now).expect("pending");
+            let (mut p, _) =
+                PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("pending");
             assert!(p.finish(&bad, Some(&socket), Some(&enrolled), now).is_err());
             assert_eq!(
                 p.finish(&bad, Some(&socket), Some(&enrolled), now),
                 Err(AssociationError::AlreadyConsumed)
             );
         }
-        let (mut zero_nonce, frame) = PendingPhoneProof::begin(&socket, &enrolled, now).expect("p");
+        let (mut zero_nonce, frame) =
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("p");
         assert_eq!(
             zero_nonce.finish(
                 &sign_response(&frame, &phone, [0; 32]),
@@ -520,11 +622,11 @@ mod tests {
 
     #[test]
     fn changed_socket_cert_endpoints_generation_and_revocation_rejected() {
-        let (socket, enrolled, phone) = fixtures();
+        let (socket, enrolled, phone, mut store) = fixtures();
         let now = Instant::now();
         for case in 0..7 {
             let (mut pending, challenge) =
-                PendingPhoneProof::begin(&socket, &enrolled, now).expect("p");
+                PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("p");
             let response = sign_response(&challenge, &phone, [5; 32]);
             let mut changed_socket = socket.clone();
             let mut changed_enrollment = enrolled.clone();
@@ -552,7 +654,8 @@ mod tests {
                 Err(AssociationError::AlreadyConsumed)
             );
         }
-        let (mut closed, frame) = PendingPhoneProof::begin(&socket, &enrolled, now).expect("p");
+        let (mut closed, frame) =
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("p");
         assert_eq!(
             closed.finish(
                 &sign_response(&frame, &phone, [5; 32]),
@@ -566,49 +669,105 @@ mod tests {
 
     #[test]
     fn reject_untrusted_or_unenrolled_native_fixtures_before_nonce_issue() {
-        let (mut socket, mut enrolled, _) = fixtures();
+        let (mut socket, mut enrolled, _, mut store) = fixtures();
         let now = Instant::now();
         socket.host.set_ip(Ipv4Addr::LOCALHOST);
         assert!(matches!(
-            PendingPhoneProof::begin(&socket, &enrolled, now),
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
             Err(AssociationError::UntrustedConnection)
         ));
         socket.host.set_ip(Ipv4Addr::new(192, 168, 1, 10));
         socket.phone.set_ip(Ipv4Addr::UNSPECIFIED);
         assert!(matches!(
-            PendingPhoneProof::begin(&socket, &enrolled, now),
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
             Err(AssociationError::UntrustedConnection)
         ));
         socket.phone.set_ip(Ipv4Addr::new(192, 168, 1, 11));
         socket.leaf_cert_sha256 = [0; 32];
         assert!(matches!(
-            PendingPhoneProof::begin(&socket, &enrolled, now),
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
             Err(AssociationError::UntrustedConnection)
         ));
         socket.leaf_cert_sha256 = [9; 32];
         enrolled.active = false;
         assert!(matches!(
-            PendingPhoneProof::begin(&socket, &enrolled, now),
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
             Err(AssociationError::UnenrolledPhone)
         ));
         enrolled.active = true;
         enrolled.revision = 0;
         assert!(matches!(
-            PendingPhoneProof::begin(&socket, &enrolled, now),
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
             Err(AssociationError::UnenrolledPhone)
         ));
     }
 
     #[test]
     fn old_nonce_replay_rejected_on_new_pending_even_same_socket() {
-        let (socket, enrolled, phone) = fixtures();
+        let (socket, enrolled, phone, mut store) = fixtures();
         let now = Instant::now();
-        let (_, previous) = PendingPhoneProof::begin(&socket, &enrolled, now).expect("previous");
+        let (_, previous) =
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("previous");
         let old_signed = sign_response(&previous, &phone, [3; 32]);
-        let (mut new_pending, _) = PendingPhoneProof::begin(&socket, &enrolled, now).expect("new");
+        let (mut new_pending, _) =
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).expect("new");
         assert_eq!(
             new_pending.finish(&old_signed, Some(&socket), Some(&enrolled), now),
             Err(AssociationError::InvalidSignature)
         );
+    }
+
+    #[test]
+    fn epoch_at_signed_wire_limit_is_last_issuable_value() {
+        let (socket, enrolled, _, mut store) = fixtures();
+        store.state.as_mut().unwrap().high_water = MAX_EPOCH - 1;
+        let now = Instant::now();
+        let (_, frame) = PendingPhoneProof::begin(&socket, &enrolled, &mut store, now).unwrap();
+        assert_eq!(
+            u64::from_be_bytes(frame[4..12].try_into().unwrap()),
+            MAX_EPOCH
+        );
+        assert!(matches!(
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
+            Err(AssociationError::EpochExhausted)
+        ));
+        assert_eq!(store.state.as_ref().unwrap().high_water, MAX_EPOCH);
+    }
+
+    #[test]
+    fn missing_state_and_concurrent_revocation_do_not_issue_challenge() {
+        let (socket, enrolled, _, mut store) = fixtures();
+        let now = Instant::now();
+        store.revoke_at_commit = true;
+        assert!(matches!(
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
+            Err(AssociationError::EpochStateChanged)
+        ));
+        assert_eq!(store.state.as_ref().unwrap().high_water, 0);
+        assert!(!store.state.as_ref().unwrap().enrollment.active);
+        store.state = None;
+        assert!(matches!(
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
+            Err(AssociationError::EpochStateUnavailable)
+        ));
+    }
+
+    #[test]
+    fn lost_commit_ack_burns_epoch_and_recovered_state_never_reuses_it() {
+        let (socket, enrolled, _, mut store) = fixtures();
+        let now = Instant::now();
+        store.lose_ack = true;
+        assert!(matches!(
+            PendingPhoneProof::begin(&socket, &enrolled, &mut store, now),
+            Err(AssociationError::EpochCommitUncertain)
+        ));
+        // Model a restart reading the already committed record; this is not
+        // an actual disk or OS rollback-resistance test.
+        let mut recovered = FixtureStore {
+            state: store.state.take(),
+            ..FixtureStore::default()
+        };
+        let (_, frame) = PendingPhoneProof::begin(&socket, &enrolled, &mut recovered, now).unwrap();
+        assert_eq!(u64::from_be_bytes(frame[4..12].try_into().unwrap()), 2);
     }
 }

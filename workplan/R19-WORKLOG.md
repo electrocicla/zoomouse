@@ -1,0 +1,16 @@
+# R19 worklog
+- 2026-11-26 21:31:13Z independently connected epoch d5b04859-016c-44f4-9dce-76e6032da8d7, root13, main 5098eb03637f 0/0. Five expected owner dirties. Parent finished before READY delivery; no competing claim.
+- R17/R18 records, native source and both Cargo lock graphs reviewed. Explicit owner gates remain. Candidate provider/advisory analysis in execution plan; no downloads, dependencies, or real credential access.
+- Initial doc writes denied before mutation by workspace mismatch after transport selection reset. Reverified scope and resumed SAME lifecycle/epoch at 21:35:38Z; no bypass.
+- Plan/tasks/worklog created before source mutation. Single orchestrator; no unnecessary workers because dependency/toolchain gates prevent independent native integration.
+- Host tls_association.rs: remove process-global resettable epoch allocation; introduce certificate-scoped high-water and enrolled revision snapshot, positive signed i64 maximum and atomic compare/commit before returning challenge. Missing or changed enrollment, exhaustion, uncertain commit fail closed. No automatic retry. Existing R18 wire ABI unchanged. Fixture tests exercise lost acknowledgement/recovered high-water, revocation race, missing state and signed bound. No production durable implementation, protected store, actual TLS or input grant.
+- Fresh governed PowerShell runs (all completion-confirmed):
+  - rustfmt --edition 2021 crates/host/src/tls_association.rs: termrun_e41120e2f5a940aeb9f0335705c7718d exit 0.
+  - cargo fmt --manifest-path crates/host/Cargo.toml --check: termrun_f8ccce2494c64eaeb39173bc445476d7 exit 0.
+  - cargo check --locked --offline --manifest-path crates/host/Cargo.toml: termrun_3ad2d911ab73462aaa835617bb270ffd exit 0.
+  - cargo test --locked --offline --manifest-path crates/host/Cargo.toml: termrun_7e3471629cb4463da6f76ae6280668ec exit 0, 87 unit + 1 compile-fail doctest; no actual TLS or durable disk evidence.
+  - cargo clippy --locked --offline --manifest-path crates/host/Cargo.toml --all-targets -- -D warnings: termrun_39b4fd2899eb4582b4490d19ef4b4959 exit 0.
+  - cargo test --locked --offline --manifest-path apps/windows/src-tauri/Cargo.toml --lib native_local_approval::tests::: termrun_b21d54f7cdbf4ea3887a966dd1a1e58e exit 0, 7 passed, 9 filtered. Compiled native Rust unit test executable, not production EXE, OS tray interaction, or physical grant.
+  - node apps/mobile/android-readiness.mjs: termrun_94cdbad669e14c86bd5c99c1e7ef8606 exit 1, missing verified official wrapper/scripts/JAR and SDK platform 37/build-tools 37.0.0/NDK 28.2.13676358. No native Android build attempted.
+- Owner gate: explicitly authorize candidate rustls 0.23.46 ring-only dependency/lock changes and official acquisition with resolved graph security/license review; independent authenticated app-scoped per-host private trust anchor, IP SAN/leaf pin, user-protected enrollment/epoch storage and rollback fence; Android release INTERNET/network-state policy and official Gradle 9.4.1 wrapper + SDK/NDK setup. No real provisioning without local consent. Keystore Ed25519 device capability remains unverified; no software fallback. Physical acceptance and actual input remain separately controlled.
+- A1–A7 blocked. Scoped publication receipt to Agents Global; no successor without renewed owner request.
