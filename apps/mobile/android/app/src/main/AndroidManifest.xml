@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- No runtime network, camera, nearby-device or storage permissions in the M1-B release shell. -->
+    <!-- Native pinned LAN TLS and explicit Android Network selection only. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application
         android:name=".MainApplication"
         android:label="@string/app_name"

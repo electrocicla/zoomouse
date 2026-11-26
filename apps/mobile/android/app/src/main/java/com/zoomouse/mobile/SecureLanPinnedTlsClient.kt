@@ -6,36 +6,30 @@ import android.content.pm.PackageManager
 import java.io.Closeable
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.io.EOFException
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.NetworkInterface
+import java.net.Proxy
 import java.net.Socket
-import java.security.MessageDigest
-import java.security.cert.X509Certificate
-import javax.net.ssl.SSLContext
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLSocket
+import java.security.cert.X509Certificate
 
 /**
- * INTERNAL native TLS 1.3 client building block. Not wired into SecureLanModule:
- * no independently enrolled host certificate, release INTERNET permission, host
- * rustls endpoint or Windows consent is available. A QR pin is NEVER a trust
- * source; [expectedLeafSha256] must originate from separate local human-verified
- * durable enrollment, not network/QR/JS. OS PKIX AND a leaf pin are both required.
+ * Native TLS1.3 client. Trust is loaded from an authenticated app-private
+ * enrollment record, never QR/JS input or the platform-wide CA store.
+ * No React Native open-success or Windows input grant is minted here.
  */
-internal class SecureLanPinnedTlsClient(
-    private val appContext: Context,
-    private val tlsContext: () -> SSLContext = {
-        SSLContext.getInstance("TLSv1.3").apply { init(null, null, null) }
-    },
-) {
+internal class SecureLanPinnedTlsClient(private val appContext: Context) {
     internal class Denied(message: String) : SecurityException(message)
 
-    /** Only an actual pinned TLS socket can construct this object. */
     internal class VerifiedSession private constructor(
         private val socket: SSLSocket,
+        private val route: SecureLanBoundNetwork,
+        private val requireTrust: () -> Unit,
         leafHash: ByteArray,
         localIp: ByteArray,
         remoteIp: ByteArray,
@@ -48,136 +42,133 @@ internal class SecureLanPinnedTlsClient(
             get() = field.clone()
         val localPort: Int = socket.localPort
         val hostPort: Int = socket.port
-        private var closed = false
+        private val closed = AtomicBoolean(false)
 
-        /** A malformed/truncated frame irreversibly tears down this TLS socket. */
-        @Synchronized
-        fun readFrame(): ByteArray {
-            if (closed) throw Denied("TLS session closed")
-            return try {
-                SecureLanFrameV1.read(DataInputStream(socket.inputStream))
-            } catch (e: Exception) {
-                close()
-                throw Denied("Invalid or interrupted native TLS frame")
-            }
+        private fun requireCurrent() {
+            if (closed.get()) throw Denied("TLS session closed")
+            route.requireCurrent()
+            requireTrust()
         }
 
         @Synchronized
-        fun writeFrame(payload: ByteArray) {
-            if (closed) throw Denied("TLS session closed")
+        fun readFrame(): ByteArray = guarded {
+            SecureLanFrameV1.read(DataInputStream(socket.inputStream))
+        }
+
+        @Synchronized
+        fun writeFrame(payload: ByteArray) = guarded {
+            SecureLanFrameV1.write(DataOutputStream(socket.outputStream), payload)
+        }
+
+        private fun <T> guarded(operation: () -> T): T {
             try {
-                SecureLanFrameV1.write(DataOutputStream(socket.outputStream), payload)
-            } catch (e: Exception) {
+                requireCurrent()
+                val result = boundedIo(route, operation)
+                requireCurrent()
+                return result
+            } catch (_: Exception) {
                 close()
-                throw Denied("Native TLS write failed")
+                throw Denied("Native TLS frame or trust invalidated")
             }
         }
 
-        @Synchronized
         override fun close() {
-            closed = true
-            try { socket.close() } catch (_: IOException) { /* fail closed */ }
+            if (closed.compareAndSet(false, true)) {
+                route.close() // interrupts pending IO before SSL teardown
+                try { socket.close() } catch (_: IOException) { /* fail closed */ }
+            }
         }
 
         companion object {
             internal fun fromVerifiedSocket(
                 socket: SSLSocket,
+                route: SecureLanBoundNetwork,
+                requireTrust: () -> Unit,
                 certHash: ByteArray,
                 local: ByteArray,
                 remote: ByteArray,
-            ) = VerifiedSession(socket, certHash, local, remote)
+            ) = VerifiedSession(socket, route, requireTrust, certHash, local, remote)
         }
     }
 
-    /**
-     * Creates no grant or React Native "success". The expected pin is an input
-     * from a future *native local approved* enrollment store, never QR payload.
-     * Fails closed on absent release permission, unsupported TLS, invalid route,
-     * PKIX/hostname validation, downgrade, pin mismatch or timeout.
-     */
-    fun connect(hostLiteral: String, port: Int, expectedLeafSha256: ByteArray): VerifiedSession {
-        if (port !in 1..65535 || expectedLeafSha256.size != 32 ||
-            expectedLeafSha256.all { it == 0.toByte() }
-        ) throw Denied("Invalid enrolled TLS host")
+    fun connect(hostLiteral: String, port: Int): VerifiedSession {
+        if (port !in 1..65535) throw Denied("Invalid host port")
         val hostOctets = privateIpv4(hostLiteral) ?: throw Denied("Private IPv4 literal required")
-        if (appContext.packageManager.checkPermission(Manifest.permission.INTERNET,
-                appContext.packageName) != PackageManager.PERMISSION_GRANTED
-        ) throw Denied("Release INTERNET permission unavailable")
+        for (permission in listOf(Manifest.permission.INTERNET, Manifest.permission.ACCESS_NETWORK_STATE)) {
+            if (appContext.packageManager.checkPermission(permission, appContext.packageName) !=
+                PackageManager.PERMISSION_GRANTED
+            ) throw Denied("Required LAN permission unavailable")
+        }
+        val trustStore = SecureLanHostTrustStore(appContext)
+        val trust = trustStore.load(hostLiteral, port)
+        fun requireTrust() {
+            if (!trust.sameRecord(trustStore.load(hostLiteral, port))) throw Denied("Host trust changed")
+        }
 
         val destination = InetAddress.getByAddress(hostOctets) as? Inet4Address
             ?: throw Denied("Invalid numeric IPv4")
-        val raw = Socket()
+        val raw = Socket(Proxy.NO_PROXY)
+        var route: SecureLanBoundNetwork? = null
         var tls: SSLSocket? = null
         try {
+            val bound = SecureLanBoundNetwork.open(appContext, destination, raw)
+            route = bound
             raw.soTimeout = IO_TIMEOUT_MS
             raw.tcpNoDelay = true
             raw.connect(InetSocketAddress(destination, port), CONNECT_TIMEOUT_MS)
-            val sourceOctets = verifyKernelSelectedPrivateRoute(raw.localAddress, hostLiteral, expectedLeafSha256)
+            bound.requireCurrent()
             if (raw.inetAddress != destination || raw.port != port) throw Denied("TCP peer switched")
-            val context = tlsContext()
-            tls = context.socketFactory.createSocket(raw, hostLiteral, port, true) as? SSLSocket
+            val local = raw.localAddress as? Inet4Address ?: throw Denied("Non-IPv4 source")
+            val localPort = raw.localPort
+            val ssl = trust.tlsContext().socketFactory.createSocket(raw, hostLiteral, port, true) as? SSLSocket
                 ?: throw Denied("Platform JSSE SSLSocket unavailable")
-            tls.soTimeout = IO_TIMEOUT_MS
-            tls.enabledProtocols = arrayOf("TLSv1.3")
-            tls.sslParameters = tls.sslParameters.apply {
-                endpointIdentificationAlgorithm = "HTTPS" // IP address SAN, no hostname bypass
+            tls = ssl
+            ssl.soTimeout = IO_TIMEOUT_MS
+            ssl.enabledProtocols = arrayOf("TLSv1.3")
+            ssl.sslParameters = ssl.sslParameters.apply {
+                endpointIdentificationAlgorithm = "HTTPS"
             }
-            tls.startHandshake() // default platform certificate-chain verification
-            if (!tls.session.isValid || tls.session.protocol != "TLSv1.3") {
+            boundedIo(bound) { ssl.startHandshake() }
+            if (!ssl.session.isValid || ssl.session.protocol != "TLSv1.3") {
                 throw Denied("TLS version or session rejected")
             }
-            val leaf = tls.session.peerCertificates.firstOrNull() as? X509Certificate
+            val leaf = ssl.session.peerCertificates.firstOrNull() as? X509Certificate
                 ?: throw Denied("Missing peer X509 leaf")
-            leaf.checkValidity()
-            val actualHash = MessageDigest.getInstance("SHA-256").digest(leaf.encoded)
-            if (!MessageDigest.isEqual(actualHash, expectedLeafSha256)) {
-                throw Denied("Host certificate differs from independent local pin")
-            }
-            val finalSource = verifyKernelSelectedPrivateRoute(tls.localAddress, hostLiteral, expectedLeafSha256)
-            if (!MessageDigest.isEqual(sourceOctets, finalSource) ||
-                tls.inetAddress != destination || tls.port != port || tls.localPort != raw.localPort
+            val actualHash = trust.verifyLeaf(leaf, hostOctets)
+            bound.requireCurrent()
+            requireTrust()
+            if (ssl.localAddress != local || ssl.localPort != localPort ||
+                ssl.inetAddress != destination || ssl.port != port
             ) throw Denied("Native socket endpoint changed during TLS")
-            return VerifiedSession.fromVerifiedSocket(tls, actualHash, finalSource, hostOctets)
+            return VerifiedSession.fromVerifiedSocket(
+                ssl, bound, ::requireTrust, actualHash, local.address, hostOctets,
+            )
         } catch (failure: Exception) {
-            try { tls?.close() } catch (_: IOException) { }
+            route?.close()
             try { raw.close() } catch (_: IOException) { }
+            try { tls?.close() } catch (_: IOException) { }
             if (failure is Denied) throw failure
             throw Denied("No verified native TLS association: ${failure.javaClass.simpleName}")
         }
-    }
-
-    private fun verifyKernelSelectedPrivateRoute(
-        local: InetAddress,
-        destination: String,
-        pin: ByteArray,
-    ): ByteArray {
-        val address = local as? Inet4Address ?: throw Denied("TCP did not bind IPv4")
-        val octets = address.address
-        val iface = NetworkInterface.getByInetAddress(address)
-            ?: throw Denied("No interface owns actual TCP source")
-        if (!Regex("(wlan|eth)[0-9]+").matches(iface.name ?: "") ||
-            !iface.isUp || iface.isLoopback || iface.isVirtual || iface.isPointToPoint
-        ) throw Denied("Observed TCP interface is not Wi-Fi/Ethernet")
-        val entries = iface.interfaceAddresses
-        if (entries.size > 32) throw Denied("Unbounded native interface")
-        val observation = SecureLanLocalInterfacePreflight.ObservedInterface(
-            iface.name, iface.isUp, iface.isLoopback, iface.isVirtual, iface.isPointToPoint,
-            entries.filter { it.address is Inet4Address && it.address == address }
-                .map { SecureLanLocalInterfacePreflight.LocalAddress(
-                    it.address.hostAddress ?: "", it.networkPrefixLength.toInt()) },
-        )
-        val observed = SecureLanLocalInterfacePreflight { listOf(observation) }
-        val pinHex = pin.joinToString("") { "%02x".format(it.toInt() and 255) }
-        if (observed.rejectionFor(destination, pinHex) != null) {
-            throw Denied("Actual socket source does not route over eligible local subnet")
-        }
-        return octets
     }
 
     companion object {
         private const val CONNECT_TIMEOUT_MS = 2_500
         private const val IO_TIMEOUT_MS = 2_500
         private val OCTET = Regex("(0|[1-9][0-9]{0,2})")
+        private val deadlines = ScheduledThreadPoolExecutor(1) { runnable ->
+            Thread(runnable, "zoomouse-tls-deadline").apply { isDaemon = true }
+        }.apply { removeOnCancelPolicy = true }
+
+        // SO_TIMEOUT alone is only a per-read bound, not a whole frame or write bound.
+        private fun <T> boundedIo(route: SecureLanBoundNetwork, operation: () -> T): T {
+            val deadline = deadlines.schedule({ route.close() }, IO_TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS)
+            return try {
+                operation().also { route.requireCurrent() }
+            } finally {
+                deadline.cancel(false)
+            }
+        }
 
         /** No InetAddress.getByName, DNS, IPv6-mapped or off-LAN fallback. */
         internal fun privateIpv4(value: String): ByteArray? {

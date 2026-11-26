@@ -11,6 +11,8 @@ import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.SecureRandom
 import java.security.Signature
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * R18 HOST-coordinated TLS phone-proof v1 codec.
@@ -196,15 +198,24 @@ internal class SecureLanEnrolledPhoneClient(
     private val random: SecureRandom = SecureRandom(),
     private val monotonicNanos: () -> Long = System::nanoTime,
 ) {
-    @Volatile private var aborted = false
+    private val aborted = AtomicBoolean(false)
+    private val started = AtomicBoolean(false)
+    private val activeSession = AtomicReference<SecureLanPinnedTlsClient.VerifiedSession?>()
 
-    fun abort() { aborted = true }
+    fun abort() {
+        aborted.set(true)
+        activeSession.getAndSet(null)?.close()
+    }
 
-    @Synchronized
     fun respondOnce(session: SecureLanPinnedTlsClient.VerifiedSession) {
-        if (aborted) throw SecureLanTlsPhoneProofV1.Denied()
+        if (aborted.get() || !started.compareAndSet(false, true)) {
+            session.close()
+            throw SecureLanTlsPhoneProofV1.Denied()
+        }
+        activeSession.set(session)
         val start = monotonicNanos()
         try {
+            if (aborted.get()) throw SecureLanTlsPhoneProofV1.Denied()
             val (phonePublic, privateKey) = identity.loadEnrolled()
             val challenge = SecureLanTlsPhoneProofV1.parseChallenge(session.readFrame())
             if (!SecureLanTlsPhoneProofV1.matchesSocket(challenge, session, phonePublic)) {
@@ -219,9 +230,14 @@ internal class SecureLanEnrolledPhoneClient(
                 "%02x".format(it.toInt() and 255)
             }
             val prefs = context.getSharedPreferences("zoomouse.r18.native-epoch", Context.MODE_PRIVATE)
-            val previous = prefs.getLong(key, 0L)
-            if (challenge.epoch <= previous || !prefs.edit().putLong(key, challenge.epoch).commit()) {
-                throw SecureLanTlsPhoneProofV1.Denied()
+            // Independent native enrollment must initialize this record. Never
+            // silently reset a missing/corrupt high-water to zero.
+            synchronized(EPOCH_LOCK) {
+                if (!prefs.contains(key)) throw SecureLanTlsPhoneProofV1.Denied()
+                val previous = prefs.getLong(key, -1L)
+                if (previous < 0 || challenge.epoch <= previous ||
+                    !prefs.edit().putLong(key, challenge.epoch).commit()
+                ) throw SecureLanTlsPhoneProofV1.Denied()
             }
             val signature = Signature.getInstance("Ed25519").run {
                 initSign(privateKey)
@@ -229,15 +245,21 @@ internal class SecureLanEnrolledPhoneClient(
                 sign()
             }
             val elapsed = monotonicNanos() - start
-            if (aborted || elapsed < 0 || elapsed >= 10_000_000_000L) {
+            if (aborted.get() || elapsed < 0 || elapsed >= 10_000_000_000L) {
                 throw SecureLanTlsPhoneProofV1.Denied()
             }
             session.writeFrame(SecureLanTlsPhoneProofV1.response(nonce, signature))
             // No authority or success result; Rust host must consume challenge,
             // verify enrolled public key and nonce, and Win11 must approve input.
         } catch (_: Exception) {
+            activeSession.compareAndSet(session, null)
             session.close()
             throw SecureLanTlsPhoneProofV1.Denied()
         }
+    }
+
+    private companion object {
+        // Serialize durable compare/commit across instances in this single app process.
+        val EPOCH_LOCK = Any()
     }
 }
